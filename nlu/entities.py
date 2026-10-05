@@ -44,23 +44,10 @@ LOCATIONS = [
 
     # Ruang bernomor
     "ruang 1",
-    "ruang satu",
     "ruang 2",
-    "ruang dua",
     "ruang 3",
-    "ruang tiga",
     "ruang 4",
-    "ruang empat",
     "ruang 5",
-    "ruang lima",
-
-    # Ruangan bernomor (variasi)
-    "ruangan 1",
-    "ruangan satu",
-    "ruangan 2",
-    "ruangan dua",
-    "ruangan 3",
-    "ruangan tiga",
 
     # Poli
     "poli umum",
@@ -90,14 +77,34 @@ LOCATION_ALIASES = {
     "lab": "ruang laboratorium",
     "ruang lab": "ruang laboratorium",
     "rontgen": "ruang rontgen",
-    "ruangan satu": "ruang 1",
-    "ruangan dua": "ruang 2",
-    "ruangan tiga": "ruang 3",
+    # Ruang kata angka -> digit standar
     "ruang satu": "ruang 1",
     "ruang dua": "ruang 2",
     "ruang tiga": "ruang 3",
     "ruang empat": "ruang 4",
     "ruang lima": "ruang 5",
+    # Ruangan variasi
+    "ruangan 1": "ruang 1",
+    "ruangan satu": "ruang 1",
+    "ruangan 2": "ruang 2",
+    "ruangan dua": "ruang 2",
+    "ruangan 3": "ruang 3",
+    "ruangan tiga": "ruang 3",
+    "ruangan 4": "ruang 4",
+    "ruangan empat": "ruang 4",
+    "ruangan 5": "ruang 5",
+    "ruangan lima": "ruang 5",
+    # Variasi typo fonetik STT: ruas -> ruang
+    "ruas 1": "ruang 1",
+    "ruas satu": "ruang 1",
+    "ruas 2": "ruang 2",
+    "ruas dua": "ruang 2",
+    "ruas 3": "ruang 3",
+    "ruas tiga": "ruang 3",
+    "ruas 4": "ruang 4",
+    "ruas empat": "ruang 4",
+    "ruas 5": "ruang 5",
+    "ruas lima": "ruang 5",
 }
 
 

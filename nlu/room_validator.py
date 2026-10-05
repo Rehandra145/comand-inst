@@ -37,8 +37,47 @@ def _load_valid_rooms() -> set:
         return set()
 
 
+import re
+
 # Load sekali saat module di-import
 VALID_ROOMS = _load_valid_rooms()
+
+_ANGKA_WORDS = {
+    "nol": 0, "satu": 1, "dua": 2, "tiga": 3, "empat": 4,
+    "lima": 5, "enam": 6, "tujuh": 7, "delapan": 8, "sembilan": 9,
+}
+
+
+def normalize_room_name(location: str) -> str:
+    """
+    Normalisasi variasi nama ruangan (e.g. 'ruang satu' -> 'ruang 1', 'ruangan dua' -> 'ruang 2',
+    'ruas 1' -> 'ruang 1').
+    """
+    if not location:
+        return location
+
+    from nlu.entities import LOCATION_ALIASES
+    loc_clean = location.strip().lower()
+
+    if loc_clean in LOCATION_ALIASES:
+        return LOCATION_ALIASES[loc_clean]
+
+    # Ganti prefix 'ruangan' atau 'ruas' menjadi 'ruang'
+    norm = re.sub(r'^(ruangan|ruas|ruan)\b', 'ruang', loc_clean).strip()
+    if norm in LOCATION_ALIASES:
+        return LOCATION_ALIASES[norm]
+
+    # Cek apakah 'ruang <kata angka>' (misal: 'ruang satu', 'ruang dua nol lima')
+    m = re.match(r'^ruang\s+(.+)$', norm)
+    if m:
+        words = m.group(1).split()
+        if all(w in _ANGKA_WORDS for w in words):
+            val = 0
+            for w in words:
+                val = val * 10 + _ANGKA_WORDS[w]
+            return f"ruang {val}"
+
+    return location
 
 
 def is_valid_room(location: str) -> bool:
@@ -56,9 +95,22 @@ def is_valid_room(location: str) -> bool:
         # (supaya tidak blocking saat belum dikonfigurasi)
         return True
 
-    return location.lower() in VALID_ROOMS
+    loc_lower = location.lower().strip()
+    if loc_lower in VALID_ROOMS:
+        return True
+
+    from nlu.entities import LOCATION_ALIASES
+    if loc_lower in LOCATION_ALIASES and LOCATION_ALIASES[loc_lower].lower() in VALID_ROOMS:
+        return True
+
+    norm = normalize_room_name(loc_lower)
+    if norm.lower() in VALID_ROOMS:
+        return True
+
+    return False
 
 
 def get_valid_rooms() -> list:
     """Return sorted list of valid rooms (untuk debugging/display)."""
     return sorted(VALID_ROOMS)
+

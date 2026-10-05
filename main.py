@@ -232,7 +232,13 @@ def print_result_box(text: str, result: dict):
     intent = result.get("intent", "UNKNOWN")
     conf = result.get("confidence", 0.0)
     slots = result.get("slots", {})
-    payload = result.get("command", {})
+    payload = result.get("command") or (
+        {
+            "action": intent.lower(),
+            "params": slots,
+            "confidence": round(conf, 2),
+        } if status == "VALID" else {}
+    )
 
     # ANSI Styling
     GREEN = "\033[32m"

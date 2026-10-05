@@ -616,6 +616,11 @@ def test_pipeline_e2e():
     assert_equal('location = ruang radiologi', "ruang radiologi", result_fuzzy3["slots"].get("location"))
     assert_equal("status = VALID", "VALID", result_fuzzy3["status"])
 
+    result_fuzzy4 = pipeline.process("BAHWA KE RUAS SATU")
+    assert_equal('"BAHWA KE RUAS SATU" -> NAVIGATE', "NAVIGATE", result_fuzzy4["intent"])
+    assert_equal('location = ruang 1', "ruang 1", result_fuzzy4["slots"].get("location"))
+    assert_equal("status = VALID", "VALID", result_fuzzy4["status"])
+
 
 # =========================
 # RUN ALL TESTS

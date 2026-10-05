@@ -91,12 +91,14 @@ _NAMED_LOCATIONS: Tuple[str, ...] = tuple(
 _NAMED_BASE_NAMES: Tuple[Tuple[str, str], ...] = tuple(
     (loc.lower().replace("ruang ", "").replace("ruangan ", "").replace("poli ", "").strip(), loc)
     for loc in _ALL_LOCATIONS
-    if loc.lower().startswith(("ruang ", "ruangan ", "poli ")) and not re.search(r'\d+', loc)
+    if loc.lower().startswith(("ruang ", "ruangan ", "poli "))
+    and not re.search(r'\d+', loc)
+    and loc.lower().replace("ruang ", "").replace("ruangan ", "").replace("poli ", "").strip() not in _ALL_NUM_WORDS
 )
 
 # Words to never consider as standalone location candidates in fuzzy matching
 _GENERIC_PREFIX_WORDS = frozenset({
-    "ruang", "ruangan", "poli", "kamar", "tempat", "bagian", "pos", "gedung", "di", "ke", "saya", "mau"
+    "ruang", "ruangan", "ruas", "poli", "kamar", "tempat", "bagian", "pos", "gedung", "di", "ke", "saya", "mau"
 })
 
 # Pre-sorted directions (longest first) — computed once
@@ -112,8 +114,8 @@ _SORTED_PERSONS: Tuple[str, ...] = tuple(
 # Original person names for output (maintain casing)
 _PERSON_ORIGINALS = {p.lower(): p for p in PERSONS}
 
-# Pre-compiled regex patterns
-_RE_ROOM_PREFIX = re.compile(r'\b(ruang(?:an)?)\s+(.+)')
+# Pre-compiled regex patterns (support phonetic STT errors like "ruas" / "ruan" for "ruang")
+_RE_ROOM_PREFIX = re.compile(r'\b(ruang(?:an)?|ruas|ruan)\s+(.+)')
 _RE_ROOM_DIGITS = re.compile(r'^(\d+)\b')
 _RE_DISTANCE_NUM = re.compile(r'(\d+(?:\.\d+)?)\s*(meter|langkah|m)\b')
 
@@ -270,8 +272,8 @@ class RuleBasedSlotExtractor(BaseSlotExtractor):
             # but we still need len >= 2 for digit mode
             pass
 
-        if all_digits and len(num_words) >= 2:
-            # Digit mode: "dua nol tiga" → 203
+        if all_digits and len(num_words) >= 1:
+            # Digit mode: "satu" → 1, "dua nol tiga" → 203
             result = 0
             for w in num_words:
                 result = result * 10 + _ANGKA[w]

@@ -82,6 +82,13 @@ def validate_command(command: Dict[str, Any]) -> Dict[str, Any]:
     # Room validation: cek apakah lokasi ada di daftar valid
     if intent == "NAVIGATE":
         location = slots.get("location", "")
+        # Normalisasi otomatis jika berupa alias atau kata angka (e.g. "ruang satu" -> "ruang 1")
+        from nlu.room_validator import normalize_room_name
+        norm_location = normalize_room_name(location)
+        if norm_location:
+            location = norm_location
+            slots["location"] = location
+
         if location and not is_valid_room(location):
             logger.warning(
                 f"[VALIDATION] Lokasi tidak valid: \"{location}\""
