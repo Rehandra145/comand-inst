@@ -217,7 +217,7 @@ def test_mic_hardware(device: int = None, duration: int = 3):
     # Simpan sampel ke file test_mic.wav
     try:
         import soundfile as sf
-        sf.write("test_mic.wav", recording, sr)
+        sf.write("test_mic.wav", recording, capture_sr)
         print("   (File rekaman sampel berhasil disimpan ke 'test_mic.wav' untuk verifikasi)")
     except Exception:
         pass
@@ -278,7 +278,7 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
     if capture_rate != stt_rate:
         logger.info(f"[AUDIO] Hardware mic berjalan di {capture_rate} Hz (auto-resample ke {stt_rate} Hz untuk STT)")
 
-    print(f"\n🎤 [LISTENING] Silakan berbicara (maks {duration} detik)... Tekan Ctrl+C untuk berhenti lebih awal.")
+    print(f"\n[LISTENING] Silakan berbicara (maks {duration} detik)... Tekan Ctrl+C untuk berhenti lebih awal.")
     print("   Live Audio Stream: ", end="", flush=True)
 
     def audio_callback(indata, frames, time_info, status_flags):
@@ -315,7 +315,7 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
     text = recognizer.get_result(stream).strip()
     print(f"\r   Transkripsi Akhir: \"\033[32m{text}\033[0m\"                                  \n")
     if not text:
-        print("⚠️  Tidak ada ucapan/kata yang terdeteksi.")
+        print("[WARN] Tidak ada ucapan/suara yang terdeteksi.")
         return
 
     result = pipeline.process(text)
@@ -328,17 +328,17 @@ def run_cli_interactive(duration: int = 5, device: int = None):
     pipeline = NLUPipeline()
 
     print("\n" + "=" * 55)
-    print("  🤖 ROBOT VOICE COMMAND (CLI / HEADLESS MODE)")
-    print("     Optimal untuk Ubuntu Server & Raspberry Pi 4")
+    print("  ROBOT VOICE COMMAND (CLI / HEADLESS MODE)")
+    print("  Optimal untuk Ubuntu Server & Raspberry Pi 4")
     print("=" * 55)
 
     while True:
         print("\nPilih Mode Operasi:")
-        print("  [1] 🎤 Bicara via Mikrofon (Streaming STT + NLU)")
-        print("  [2] ⌨️  Ketik Perintah Teks Manual")
-        print("  [3] 🔍 List Perangkat Input Audio")
-        print("  [4] 🧪 Tes Diagnosa & Level Volume Mikrofon")
-        print("  [q] ❌ Keluar")
+        print("  [1] Bicara via Mikrofon (Streaming STT + NLU)")
+        print("  [2] Ketik Perintah Teks Manual")
+        print("  [3] List Perangkat Input Audio")
+        print("  [4] Tes Diagnosa & Level Volume Mikrofon")
+        print("  [q] Keluar")
 
         try:
             choice = input("\nPilihan [1/2/3/4/q]: ").strip().lower()
@@ -394,8 +394,8 @@ def run_gui_mode(duration: int = 5, device: int = None):
         import tkinter.font as tkfont
         root = tk.Tk()
     except Exception as e:
-        logger.warning(f"\n⚠️  Gagal membuka GUI Tkinter (tidak ada Display Server / $DISPLAY): {e}")
-        logger.info("👉 Beralih otomatis ke Mode CLI Interaktif (Terminal)...\n")
+        logger.warning(f"\n[WARN] Gagal membuka GUI Tkinter (tidak ada Display Server / $DISPLAY): {e}")
+        logger.info("[INFO] Beralih otomatis ke Mode CLI Interaktif (Terminal)...\n")
         run_cli_interactive(duration=duration, device=device)
         return
 
