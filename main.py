@@ -36,10 +36,44 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+from config import DEFAULT_MIC_DEVICE
+
 
 # =========================
 # CLI / TERMINAL HELPERS
 # =========================
+
+def get_effective_input_device(device: int = None) -> int:
+    """
+    Menentukan index perangkat mikrofon yang aktif:
+    1. Jika ditentukan via argumen/flag (--device <ID>), prioritaskan itu.
+    2. Jika diset di config.py (DEFAULT_MIC_DEVICE), gunakan itu.
+    3. Jika default OS memiliki channel input > 0, gunakan itu.
+    4. Jika default OS tidak punya input channel (kasus umum di Ubuntu Server / Raspi),
+       otomatis cari dan gunakan perangkat input pertama yang aktif (misal USB Mic).
+    """
+    if device is not None:
+        return device
+
+    if DEFAULT_MIC_DEVICE is not None:
+        return DEFAULT_MIC_DEVICE
+
+    try:
+        import sounddevice as sd
+        devices = sd.query_devices()
+        default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else -1
+        if 0 <= default_in < len(devices) and devices[default_in].get("max_input_channels", 0) > 0:
+            return default_in
+
+        for i, dev in enumerate(devices):
+            if dev.get("max_input_channels", 0) > 0:
+                logger.info(f"[AUDIO] Otomatis memilih input device ID {i}: {dev['name']}")
+                return i
+    except Exception:
+        pass
+
+    return None
+
 
 def list_audio_devices():
     """Tampilkan daftar perangkat input audio (microphone) yang tersedia."""
@@ -49,15 +83,16 @@ def list_audio_devices():
         print("\n=== DAFTAR PERANGKAT INPUT AUDIO ===")
         found = False
         default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else -1
+        effective_in = get_effective_input_device()
         for i, dev in enumerate(devices):
             if dev.get("max_input_channels", 0) > 0:
                 found = True
-                is_default = "*" if i == default_in else " "
-                print(f" [{is_default}] Device ID {i:2d}: {dev['name']} (Channels: {dev['max_input_channels']})")
+                marker = "*" if i == effective_in else " "
+                print(f" [{marker}] Device ID {i:2d}: {dev['name']} (Channels: {dev['max_input_channels']})")
         if not found:
             print("  (Tidak ada perangkat microphone yang terdeteksi)")
         else:
-            print("\n  Keterangan: [*] = Perangkat input default sistem.")
+            print(f"\n  Keterangan: [*] = Perangkat input aktif yang akan digunakan (ID: {effective_in}).")
             print("  Gunakan flag --device <ID> untuk memilih mikrofon tertentu.\n")
     except Exception as e:
         print(f"Gagal mendeteksi perangkat audio: {e}\n")
@@ -65,6 +100,7 @@ def list_audio_devices():
 
 def test_mic_hardware(device: int = None, duration: int = 3):
     """Diagnosa dan uji coba mikrofon, periksa level sinyal audio & volume."""
+    device = get_effective_input_device(device)
     print("\n" + "=" * 60)
     print("  [DIAGNOSA] Driver Audio & Perangkat Mikrofon")
     print("=" * 60)
@@ -183,6 +219,7 @@ def print_result_box(text: str, result: dict):
 
 def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
     """Rekam audio dari mikrofon dan proses real-time streaming di terminal."""
+    device = get_effective_input_device(device)
     import sounddevice as sd
     from stt import recognizer, create_stream
 
@@ -309,6 +346,7 @@ def run_gui_mode(duration: int = 5, device: int = None):
         run_cli_interactive(duration=duration, device=device)
         return
 
+    device = get_effective_input_device(device)
     import sounddevice as sd
     import threading
 
@@ -411,6 +449,7 @@ def run_gui_mode(duration: int = 5, device: int = None):
                 channels=CHANNELS,
                 dtype="float32",
                 blocksize=chunk_size,
+                device=device,
                 callback=audio_callback,
             ):
                 start_time = time.time()
