@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import time
+import numpy as np
 
 # Pastikan output terminal mendukung UTF-8 di Windows maupun Linux
 if hasattr(sys.stdout, "reconfigure"):
@@ -306,24 +307,28 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
             while recognizer.is_ready(stream):
                 recognizer.decode_stream(stream)
 
-            # Cek endpoint detection langsung di audio thread (thread-safe, hindari race condition C++)
-            if recognizer.is_endpoint(stream):
-                partial = recognizer.get_result(stream).strip()
-                if partial:
-                    last_text = partial
-                    stop_event.set()
-                    return
-
+            is_endpoint = recognizer.is_endpoint(stream)
             partial = recognizer.get_result(stream).strip()
+
             if partial:
                 if partial != last_text:
                     last_text = partial
                     last_change_time = time.time()
                 sys.stdout.write(f"\r   Live Audio Stream: \"\033[36m{partial}\033[0m...\" ")
                 sys.stdout.flush()
+
+            # Handle endpoint: jika user sudah bicara dan ada hening, hentikan.
+            # Jika masih hening awal (belum ada teks), reset stream agar tidak mengunci state endpoint.
+            if is_endpoint:
+                if partial:
+                    last_text = partial
+                    stop_event.set()
+                    return
+                else:
+                    recognizer.reset(stream)
+
         except Exception as err:
             logger.debug(f"[AUDIO] Callback error: {err}")
-            stop_event.set()
 
     chunk_size = int(capture_rate * 0.1)
     try:
@@ -338,8 +343,8 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
             start = time.time()
             while time.time() - start < duration and not stop_event.is_set():
                 time.sleep(0.05)
-                # Auto-stop jika pengguna sudah hening selama 0.8 detik setelah berucap
-                if last_change_time and (time.time() - last_change_time > 0.8):
+                # Auto-stop jika pengguna sudah hening selama 1.2 detik setelah berucap
+                if last_text and last_change_time and (time.time() - last_change_time > 1.2):
                     stop_event.set()
                     break
     except KeyboardInterrupt:
@@ -500,6 +505,7 @@ def run_gui_mode(duration: int = 5, device: int = None):
 
     def record_and_process_stream():
         nonlocal is_recording
+        stop_event.clear()
         stream = create_stream()
 
         ui_call(lambda: talk_button.config(
@@ -529,18 +535,21 @@ def run_gui_mode(duration: int = 5, device: int = None):
                 while recognizer.is_ready(stream):
                     recognizer.decode_stream(stream)
 
-                if recognizer.is_endpoint(stream):
-                    if recognizer.get_result(stream).strip():
-                        stop_event.set()
-                        return
-
-                # Live partial text update ke GUI
+                is_endpoint = recognizer.is_endpoint(stream)
                 partial = recognizer.get_result(stream).strip()
+
                 if partial:
                     ui_call(lambda: stt_label.config(text=f"$ stt: \"{partial}...\"", fg=CYAN))
+
+                if is_endpoint:
+                    if partial:
+                        stop_event.set()
+                        return
+                    else:
+                        recognizer.reset(stream)
+
             except Exception as err:
-                logger.debug(f"[AUDIO] GUI callback error: {err}")
-                stop_event.set()
+                logger.error(f"[AUDIO] GUI callback error: {err}")
 
         try:
             # Chunk size: 100 ms
