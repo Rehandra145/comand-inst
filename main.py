@@ -12,8 +12,17 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import sys
 import time
+
+# Pastikan output terminal mendukung UTF-8 di Windows maupun Linux
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 
 # =========================
@@ -29,6 +38,246 @@ logger = logging.getLogger(__name__)
 
 
 # =========================
+# CLI / TERMINAL HELPERS
+# =========================
+
+def list_audio_devices():
+    """Tampilkan daftar perangkat input audio (microphone) yang tersedia."""
+    try:
+        import sounddevice as sd
+        devices = sd.query_devices()
+        print("\n=== DAFTAR PERANGKAT INPUT AUDIO ===")
+        found = False
+        default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else -1
+        for i, dev in enumerate(devices):
+            if dev.get("max_input_channels", 0) > 0:
+                found = True
+                is_default = "*" if i == default_in else " "
+                print(f" [{is_default}] Device ID {i:2d}: {dev['name']} (Channels: {dev['max_input_channels']})")
+        if not found:
+            print("  (Tidak ada perangkat microphone yang terdeteksi)")
+        else:
+            print("\n  Keterangan: [*] = Perangkat input default sistem.")
+            print("  Gunakan flag --device <ID> untuk memilih mikrofon tertentu.\n")
+    except Exception as e:
+        print(f"Gagal mendeteksi perangkat audio: {e}\n")
+
+
+def test_mic_hardware(device: int = None, duration: int = 3):
+    """Diagnosa dan uji coba mikrofon, periksa level sinyal audio & volume."""
+    print("\n" + "=" * 60)
+    print("  [DIAGNOSA] Driver Audio & Perangkat Mikrofon")
+    print("=" * 60)
+    try:
+        import sounddevice as sd
+        import numpy as np
+    except ImportError as e:
+        print(f"[ERROR] Library belum lengkap: {e}")
+        print("   Jalankan: sudo apt install -y portaudio19-dev libasound2-dev")
+        print("   Lalu: uv pip install sounddevice numpy\n")
+        return
+
+    try:
+        dev_info = sd.query_devices(device, "input")
+    except Exception as e:
+        print(f"[ERROR] Gagal mengakses perangkat audio input (ID: {device}): {e}")
+        print("   Gunakan flag --list-devices untuk melihat ID perangkat yang tersedia.\n")
+        return
+
+    dev_name = dev_info.get("name", "Unknown")
+    channels = dev_info.get("max_input_channels", 0)
+    sr = 16000
+
+    print(f"\n1. Perangkat Terpilih : [{device if device is not None else 'Default'}] {dev_name}")
+    print(f"   Jumlah Channel     : {channels}")
+    print(f"   Target Sample Rate : {sr} Hz")
+
+    print(f"\n2. Merekam suara sampel selama {duration} detik...")
+    print("   >> SILAKAN BERBICARA ATAU BUAT SUARA SEKARANG...")
+
+    try:
+        recording = sd.rec(
+            int(duration * sr),
+            samplerate=sr,
+            channels=1,
+            dtype="float32",
+            device=device,
+        )
+        sd.wait()
+    except Exception as e:
+        print(f"\n[ERROR] Gagal merekam audio dari driver: {e}")
+        print("   Tips Ubuntu Server:")
+        print("   1. Pastikan user masuk ke grup audio: 'sudo usermod -aG audio $USER'")
+        print("   2. Cek apakah ALSA mengenali mic USB: 'arecord -l'\n")
+        return
+
+    # Hitung RMS & Peak Amplitude
+    rms = float(np.sqrt(np.mean(recording ** 2)))
+    peak = float(np.max(np.abs(recording)))
+
+    print(f"\n3. Hasil Pengukuran Level Sinyal Audio:")
+    print(f"   - Root Mean Square (RMS) Level : {rms:.5f}")
+    print(f"   - Peak Amplitude (0.0 s/d 1.0) : {peak:.5f}")
+
+    if peak < 0.01:
+        print("\n[PERINGATAN] Sinyal suara SANGAT LEMAH atau HENING (MUTE)!")
+        print("   Driver hardware terdeteksi, tetapi mikrofon tidak menangkap suara.")
+        print("   Penyebab & Solusi Umum di Ubuntu Server:")
+        print("   - Volume Capture ALSA di-mute atau bernilai 0%.")
+        print("   - Jalankan 'alsamixer' di terminal -> Tekan F6 (pilih USB Mic) -> Tekan F4 (Capture) -> Naikkan volume tombol Panah Atas.")
+    elif peak < 0.05:
+        print("\n[CATATAN] Sinyal suara terdeteksi tetapi volumenya agak pelan.")
+        print("   Disarankan menaikkan gain mikrofon lewat 'alsamixer'.")
+    else:
+        print("\n[BERHASIL] Driver & Mikrofon berfungsi NORMAL! Sinyal audio masuk dengan jelas.")
+
+    # Simpan sampel ke file test_mic.wav
+    try:
+        import soundfile as sf
+        sf.write("test_mic.wav", recording, sr)
+        print("   (File rekaman sampel berhasil disimpan ke 'test_mic.wav' untuk verifikasi)")
+    except Exception:
+        pass
+
+    print("=" * 60 + "\n")
+
+
+
+def print_result_box(text: str, result: dict):
+    """Cetak hasil transkripsi dan NLU dalam format terminal yang rapi."""
+    status = result.get("status", "UNKNOWN")
+    intent = result.get("intent", "UNKNOWN")
+    conf = result.get("confidence", 0.0)
+    slots = result.get("slots", {})
+    payload = result.get("command", {})
+
+    # ANSI Styling
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    RED = "\033[31m"
+    CYAN = "\033[36m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+
+    if status == "VALID":
+        status_colored = f"{GREEN}{status}{RESET}"
+    elif status == "INVALID_LOCATION":
+        status_colored = f"{RED}{status}{RESET}"
+    else:
+        status_colored = f"{YELLOW}{status}{RESET}"
+
+    print(f"\n{BOLD}=========================== HASIL NLU ==========================={RESET}")
+    print(f" {BOLD}Audio Transkripsi :{RESET} {CYAN}\"{text}\"{RESET}")
+    print(f" {BOLD}Intent            :{RESET} {BOLD}{intent}{RESET} (Confidence: {conf:.2f})")
+    print(f" {BOLD}Extracted Slots   :{RESET} {json.dumps(slots, ensure_ascii=False) if slots else '-'}")
+    print(f" {BOLD}Validation Status :{RESET} {status_colored}")
+    if "missing_slots" in result:
+        print(f" {BOLD}Missing Slots     :{RESET} {RED}{result['missing_slots']}{RESET}")
+    if "invalid_room" in result:
+        print(f" {BOLD}Invalid Room      :{RESET} {RED}{result['invalid_room']}{RESET}")
+    print(f" {BOLD}ROS 2 Payload     :{RESET}")
+    print(f"{DIM}{json.dumps(payload, indent=2, ensure_ascii=False)}{RESET}")
+    print(f"{BOLD}================================================================={RESET}\n")
+
+
+def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
+    """Rekam audio dari mikrofon dan proses real-time streaming di terminal."""
+    import sounddevice as sd
+    from stt import recognizer, create_stream
+
+    sample_rate = 16000
+    channels = 1
+    stream = create_stream()
+
+    print(f"\n🎤 [LISTENING] Silakan berbicara (maks {duration} detik)... Tekan Ctrl+C untuk berhenti lebih awal.")
+    print("   Live Audio Stream: ", end="", flush=True)
+
+    def audio_callback(indata, frames, time_info, status_flags):
+        samples = indata.flatten()
+        stream.accept_waveform(sample_rate, samples)
+        while recognizer.is_ready(stream):
+            recognizer.decode_stream(stream)
+        partial = recognizer.get_result(stream).strip()
+        if partial:
+            sys.stdout.write(f"\r   Live Audio Stream: \"\033[36m{partial}\033[0m...\" ")
+            sys.stdout.flush()
+
+    chunk_size = int(sample_rate * 0.1)
+    try:
+        with sd.InputStream(
+            samplerate=sample_rate,
+            channels=channels,
+            dtype="float32",
+            blocksize=chunk_size,
+            device=device,
+            callback=audio_callback,
+        ):
+            start = time.time()
+            while time.time() - start < duration:
+                time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"\n[ERROR Microphone]: {e}")
+        return
+
+    text = recognizer.get_result(stream).strip()
+    print(f"\r   Transkripsi Akhir: \"\033[32m{text}\033[0m\"                                  \n")
+    if not text:
+        print("⚠️  Tidak ada ucapan/kata yang terdeteksi.")
+        return
+
+    result = pipeline.process(text)
+    print_result_box(text, result)
+
+
+def run_cli_interactive(duration: int = 5, device: int = None):
+    """Menu CLI interaktif untuk terminal headless / Ubuntu Server."""
+    from nlu.pipeline import NLUPipeline
+    pipeline = NLUPipeline()
+
+    print("\n" + "=" * 55)
+    print("  🤖 ROBOT VOICE COMMAND (CLI / HEADLESS MODE)")
+    print("     Optimal untuk Ubuntu Server & Raspberry Pi 4")
+    print("=" * 55)
+
+    while True:
+        print("\nPilih Mode Operasi:")
+        print("  [1] 🎤 Bicara via Mikrofon (Streaming STT + NLU)")
+        print("  [2] ⌨️  Ketik Perintah Teks Manual")
+        print("  [3] 🔍 List Perangkat Input Audio")
+        print("  [4] 🧪 Tes Diagnosa & Level Volume Mikrofon")
+        print("  [q] ❌ Keluar")
+
+        try:
+            choice = input("\nPilihan [1/2/3/4/q]: ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print("\nKeluar...")
+            break
+
+        if choice == "1":
+            record_and_process_cli(pipeline, duration=duration, device=device)
+        elif choice == "2":
+            try:
+                txt = input("\nMasukkan perintah (misal: 'tolong antar saya ke ruang ICU'): ").strip()
+                if txt:
+                    result = pipeline.process(txt)
+                    print_result_box(txt, result)
+            except (KeyboardInterrupt, EOFError):
+                pass
+        elif choice == "3":
+            list_audio_devices()
+        elif choice == "4":
+            test_mic_hardware(device=device, duration=duration)
+        elif choice in ["q", "quit", "exit"]:
+            print("Keluar dari program. Sampai jumpa!\n")
+            break
+        else:
+            print("Pilihan tidak valid.")
+
+
+# =========================
 # TEXT MODE
 # =========================
 
@@ -39,25 +288,27 @@ def run_text_mode(text: str):
 
     pipeline = NLUPipeline()
     result = pipeline.process(text)
-
-    print()
-    print("=" * 50)
-    print("RESULT:")
-    print("=" * 50)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    print()
+    print_result_box(text, result)
 
 
 # =========================
 # GUI MODE
 # =========================
 
-def run_gui_mode():
+def run_gui_mode(duration: int = 5, device: int = None):
     """Jalankan GUI Tkinter dengan microphone + real-time streaming STT + NLU pipeline."""
 
-    import tkinter as tk
-    from tkinter import messagebox
-    import tkinter.font as tkfont
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        import tkinter.font as tkfont
+        root = tk.Tk()
+    except Exception as e:
+        logger.warning(f"\n⚠️  Gagal membuka GUI Tkinter (tidak ada Display Server / $DISPLAY): {e}")
+        logger.info("👉 Beralih otomatis ke Mode CLI Interaktif (Terminal)...\n")
+        run_cli_interactive(duration=duration, device=device)
+        return
+
     import sounddevice as sd
     import threading
 
@@ -67,7 +318,7 @@ def run_gui_mode():
     # Audio Config
     SAMPLE_RATE = 16000
     CHANNELS = 1
-    RECORD_SECONDS = 5  # Max duration (dapat dihentikan lebih awal via tombol)
+    RECORD_SECONDS = duration  # Max duration (dapat dihentikan lebih awal via tombol)
 
     # NLU Pipeline instance
     pipeline = NLUPipeline()
@@ -75,7 +326,6 @@ def run_gui_mode():
     # =========================
     # GUI INITIALIZATION & FONT
     # =========================
-    root = tk.Tk()
     root.title("Robot Voice Command")
     root.geometry("720x540")
     root.resizable(False, False)
@@ -415,20 +665,98 @@ def run_gui_mode():
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
-        description="Robot Voice Command MVP"
+        description="Robot Voice Command NLU Pipeline (GUI & Headless CLI)"
     )
 
     parser.add_argument(
         "--text",
         type=str,
         default=None,
-        help="Process text langsung (tanpa microphone/STT)."
+        help="Proses teks langsung melalui NLU pipeline (tanpa microphone/STT)."
              " Contoh: --text \"antar saya ke ruang ICU\"",
+    )
+
+    parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="Jalankan menu interaktif di terminal (cocok untuk Ubuntu Server / SSH).",
+    )
+
+    parser.add_argument(
+        "--mic",
+        action="store_true",
+        help="Rekam langsung dari microphone 1 kali via terminal tanpa GUI.",
+    )
+
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="Tampilkan daftar perangkat input audio (microphone) yang terdeteksi.",
+    )
+
+    parser.add_argument(
+        "--device",
+        type=int,
+        default=None,
+        help="Index device audio microphone (default: None / default sistem).",
+    )
+
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=5,
+        help="Durasi maksimal mendengarkan mikrofon dalam detik (default: 5).",
+    )
+
+    parser.add_argument(
+        "--test-mic",
+        action="store_true",
+        help="Uji coba driver mikrofon, rekam sampel 3 detik, dan periksa level volume/sinyal.",
+    )
+
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Paksa menjalankan mode antarmuka GUI Tkinter.",
     )
 
     args = parser.parse_args()
 
+    # 1. List audio devices
+    if args.list_devices:
+        list_audio_devices()
+        sys.exit(0)
+
+    # 2. Test mic hardware & driver
+    if args.test_mic:
+        test_mic_hardware(device=args.device, duration=args.duration)
+        sys.exit(0)
+
+    # 3. Text mode
     if args.text:
         run_text_mode(args.text)
+        sys.exit(0)
+
+    # 4. Direct terminal mic mode
+    if args.mic:
+        from nlu.pipeline import NLUPipeline
+        pipeline = NLUPipeline()
+        record_and_process_cli(pipeline, duration=args.duration, device=args.device)
+        sys.exit(0)
+
+    # 5. Interactive CLI mode
+    if args.cli:
+        run_cli_interactive(duration=args.duration, device=args.device)
+        sys.exit(0)
+
+    # 5. Default mode:
+    # Cek apakah sistem memiliki display server (X11 / Wayland) atau dipaksa GUI
+    has_display = bool(os.environ.get("DISPLAY")) or (sys.platform == "win32")
+
+    if args.gui or has_display:
+        run_gui_mode(duration=args.duration, device=args.device)
     else:
-        run_gui_mode()
+        # Otomatis CLI jika di Ubuntu Server / Headless tanpa display
+        logger.info("\n[INFO] Menjalankan di environment Headless / Server (tanpa display).")
+        logger.info("[INFO] Membuka Mode CLI Interaktif...\n")
+        run_cli_interactive(duration=args.duration, device=args.device)

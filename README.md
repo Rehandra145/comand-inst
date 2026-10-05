@@ -268,21 +268,70 @@ command-inst/
 - Perangkat mikrofon yang terhubung (untuk mode GUI / suara langsung)
 
 ### Instalasi Dependensi
+
+#### Opsi 1: Menggunakan `uv` (Direkomendasikan - Sangat Cepat di Raspberry Pi)
 ```bash
-# Menggunakan virtualenv / uv
+# Sinkronisasi langsung dari project
 uv sync
-# Atau menggunakan pip biasa:
-pip install -r pyproject.toml
+
+# Atau pasang melalui requirements.txt
+uv pip install -r requirements.txt
 ```
+
+#### Opsi 2: Menggunakan `pip` Standar
+```bash
+pip install -r requirements.txt
+```
+
+> [!TIP]
+> Untuk instalasi di **Raspberry Pi 4 Model B (4GB RAM)**, pastikan paket sistem audio & GUI telah terpasang:
+> ```bash
+> sudo apt update && sudo apt install -y portaudio19-dev libasound2-dev libsndfile1 python3-tk
+> ```
+
 
 ### Menjalankan Program
 
-#### 1. Mode GUI (Mikrofon + Streaming STT + NLU):
+#### 1. Mode CLI Interaktif (Rekomendasi untuk Ubuntu Server 22.04 LTS / Headless):
+Jika dijalankan di Ubuntu Server tanpa monitor/X11, program akan **otomatis mendeteksi lingkungan headless** dan membuka menu CLI interaktif:
 ```bash
-python main.py
+# Menjalankan menu interaktif di terminal:
+python main.py --cli
+# (Atau cukup 'python main.py' saat di server headless)
 ```
 
-#### 2. Mode CLI / Teks Langsung (Tanpa Mikrofon, untuk Pengujian Cepat):
+Menu interaktif menyediakan opsi:
+- `[1]` Bicara via mikrofon (streaming real-time STT langsung di terminal)
+- `[2]` Ketik perintah teks manual untuk menguji NLU
+- `[3]` Cek daftar perangkat mikrofon yang terhubung
+
+#### 2. Mode Mikrofon Langsung via Terminal (CLI):
+```bash
+# Rekam suara langsung selama 5 detik:
+python main.py --mic
+
+# Rekam dengan durasi kustom (misal 7 detik):
+python main.py --mic --duration 7
+
+# Pilih ID mikrofon tertentu (cek ID dengan --list-devices):
+python main.py --mic --device 1
+```
+
+#### 3. Cek & Diagnosa Driver Mikrofon:
+```bash
+# Lihat daftar seluruh input mikrofon yang terdeteksi
+python main.py --list-devices
+
+# Diagnosa driver & uji rekam level volume (otomatis ukur RMS & Peak amplitude)
+python main.py --test-mic
+```
+
+#### 4. Mode GUI (Desktop / Raspberry Pi dengan Layar):
+```bash
+python main.py --gui
+```
+
+#### 5. Mode CLI / Teks Langsung (Tanpa Mikrofon, untuk Pengujian Cepat):
 ```bash
 # Perintah navigasi ruangan bernomor (digit mode)
 python main.py --text "antar ke ruang satu nol empat"
