@@ -112,8 +112,8 @@ Previous Non-Blank Tokens ──────────────────
    $$P(y_{t,u} \mid X, Y_{<u}) = \text{Softmax}(z_{t, u}) = \frac{\exp(z_{t, u, k})}{\sum_{j \in \mathcal{Y} \cup \{\varnothing\}} \exp(z_{t, u, j})}$$
 
 5. **Streaming Chunk & Latency Optimization**:
-   Audio dialirkan dalam potongan buffer berukuran $100\text{ ms}$ ($N_{chunk} = 1600\text{ sampel}$ pada $f_s = 16\text{ kHz}$). Menggunakan decoding *Greedy Search* ($\hat{y} = \arg\max P(y_{t,u})$) yang berkonsumsi CPU minimal tanpa overhead percabangan *beam search*, sehingga *perceived latency* saat pengguna selesai berucap praktis mendekati instan:
-   $$\text{Perceived Latency} = t_{\text{speech\_end}} - t_{\text{decode\_complete}} \approx \mathbf{0.00\text{ ms}}$$
+   Audio dialirkan dalam potongan buffer berukuran 100 ms ($N = 1600$ sampel pada frekuensi sampling 16 kHz). Menggunakan decoding *Greedy Search* ($\hat{y} = \arg\max P(y_{t,u})$) yang berkonsumsi CPU minimal tanpa overhead percabangan *beam search*, sehingga *perceived latency* saat pengguna selesai berucap praktis mendekati instan:
+   $$\text{Perceived Latency} = t_{\text{speech-end}} - t_{\text{decode-complete}} \approx \mathbf{0.00\text{ ms}}$$
 
 > [!NOTE]
 > **Pustaka & Referensi Ilmiah**:
@@ -135,11 +135,11 @@ Algoritma *Levenshtein Distance* hanya menghitung jumlah operasi edit tunggal ka
 
 #### Formulasi Matematis:
 Diberikan string input $S_1$ dan string target $S_2$:
-$$\text{Similarity}(S_1, S_2) = \frac{2 \cdot |\mathcal{K}_{match}|}{|S_1| + |S_2|}$$
+$$\text{Similarity}(S_1, S_2) = \frac{2 \cdot |\mathcal{K}_{\text{match}}|}{|S_1| + |S_2|}$$
 
 Di mana:
-- $|\mathcal{K}_{match}|$ adalah total jumlah karakter pada seluruh potongan substring kontigu terpanjang yang sama (*common contiguous substrings*), dihitung secara rekursif:
-  $$|\mathcal{K}_{match}| = |S_{LCS}| + |\mathcal{K}_{\text{left}}| + |\mathcal{K}_{\text{right}}|$$
+- $|\mathcal{K}_{\text{match}}|$ adalah total jumlah karakter pada seluruh potongan substring kontigu terpanjang yang sama (*common contiguous substrings*), dihitung secara rekursif:
+  $$|\mathcal{K}_{\text{match}}| = |S_{\text{LCS}}| + |\mathcal{K}_{\text{left}}| + |\mathcal{K}_{\text{right}}|$$
 - $|S_1|$ dan $|S_2|$ adalah panjang karakter string pertama dan kedua ($0.0 \le \text{Similarity} \le 1.0$).
 
 #### Matriks Ambang Batas (Threshold) & Isolasi False Positive:
@@ -213,7 +213,7 @@ Robot pelayanan rumah sakit tidak boleh mengeksekusi navigasi ke ruangan fiktif,
 #### Formulasi Matematis:
 $$\text{Status}(loc) = \begin{cases} 
 \text{VALID}, & \text{jika } \text{lower}(loc) \in \mathcal{S}_{\text{valid}} \\
-\text{INVALID\_LOCATION}, & \text{jika } \text{lower}(loc) \notin \mathcal{S}_{\text{valid}}
+\text{INVALID-LOCATION}, & \text{jika } \text{lower}(loc) \notin \mathcal{S}_{\text{valid}}
 \end{cases}$$
 
 Di mana $\mathcal{S}_{\text{valid}}$ diindeks sebagai struktur data **Hash Set** (`set` Python):
