@@ -75,6 +75,51 @@ def get_effective_input_device(device: int = None) -> int:
     return None
 
 
+def get_supported_sample_rate(device: int = None) -> int:
+    """
+    Deteksi sample rate yang didukung langsung oleh hardware mikrofon.
+    Prioritaskan 16000 Hz (native STT). Jika hardware menolak 16000 Hz
+    (misal USB mic yang hanya mendukung 48000 Hz / 44100 Hz), otomatis
+    gunakan sample rate asli hardware tersebut.
+    """
+    import sounddevice as sd
+    candidates = [16000, 48000, 44100, 32000, 22050, 8000]
+    for rate in candidates:
+        try:
+            sd.check_input_settings(device=device, samplerate=rate, channels=1, dtype="float32")
+            return rate
+        except Exception:
+            continue
+
+    try:
+        dev_info = sd.query_devices(device, "input")
+        return int(dev_info.get("default_samplerate", 16000))
+    except Exception:
+        return 16000
+
+
+def resample_to_16k(samples, orig_sr: int):
+    """Resample array audio float32 dari orig_sr ke 16000 Hz untuk Sherpa-ONNX."""
+    import numpy as np
+    if orig_sr == 16000 or len(samples) == 0:
+        return samples
+
+    if orig_sr == 48000:
+        # Decimation 3:1 (48000 Hz / 3 = 16000 Hz) — sangat cepat, tanpa latency
+        return samples[::3]
+
+    if orig_sr == 32000:
+        return samples[::2]
+
+    # Interpolasi cepat untuk sample rate sembarang (misal 44100 Hz)
+    target_length = int(len(samples) * 16000 / orig_sr)
+    if target_length <= 0:
+        return np.array([], dtype=np.float32)
+    x_old = np.linspace(0, 1, len(samples), endpoint=False)
+    x_new = np.linspace(0, 1, target_length, endpoint=False)
+    return np.interp(x_new, x_old, samples).astype(np.float32)
+
+
 def list_audio_devices():
     """Tampilkan daftar perangkat input audio (microphone) yang tersedia."""
     try:
@@ -88,7 +133,8 @@ def list_audio_devices():
             if dev.get("max_input_channels", 0) > 0:
                 found = True
                 marker = "*" if i == effective_in else " "
-                print(f" [{marker}] Device ID {i:2d}: {dev['name']} (Channels: {dev['max_input_channels']})")
+                native_sr = get_supported_sample_rate(i)
+                print(f" [{marker}] Device ID {i:2d}: {dev['name']} (Channels: {dev['max_input_channels']}, Rate: {native_sr} Hz)")
         if not found:
             print("  (Tidak ada perangkat microphone yang terdeteksi)")
         else:
@@ -122,19 +168,19 @@ def test_mic_hardware(device: int = None, duration: int = 3):
 
     dev_name = dev_info.get("name", "Unknown")
     channels = dev_info.get("max_input_channels", 0)
-    sr = 16000
+    capture_sr = get_supported_sample_rate(device)
 
     print(f"\n1. Perangkat Terpilih : [{device if device is not None else 'Default'}] {dev_name}")
     print(f"   Jumlah Channel     : {channels}")
-    print(f"   Target Sample Rate : {sr} Hz")
+    print(f"   Hardware Sample Rate: {capture_sr} Hz {'(akan di-resample otomatis ke 16000 Hz untuk STT)' if capture_sr != 16000 else ''}")
 
     print(f"\n2. Merekam suara sampel selama {duration} detik...")
     print("   >> SILAKAN BERBICARA ATAU BUAT SUARA SEKARANG...")
 
     try:
         recording = sd.rec(
-            int(duration * sr),
-            samplerate=sr,
+            int(duration * capture_sr),
+            samplerate=capture_sr,
             channels=1,
             dtype="float32",
             device=device,
@@ -148,8 +194,9 @@ def test_mic_hardware(device: int = None, duration: int = 3):
         return
 
     # Hitung RMS & Peak Amplitude
-    rms = float(np.sqrt(np.mean(recording ** 2)))
-    peak = float(np.max(np.abs(recording)))
+    samples_flat = recording.flatten()
+    rms = float(np.sqrt(np.mean(samples_flat ** 2)))
+    peak = float(np.max(np.abs(samples_flat)))
 
     print(f"\n3. Hasil Pengukuran Level Sinyal Audio:")
     print(f"   - Root Mean Square (RMS) Level : {rms:.5f}")
@@ -223,16 +270,22 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
     import sounddevice as sd
     from stt import recognizer, create_stream
 
-    sample_rate = 16000
+    capture_rate = get_supported_sample_rate(device)
+    stt_rate = 16000
     channels = 1
     stream = create_stream()
+
+    if capture_rate != stt_rate:
+        logger.info(f"[AUDIO] Hardware mic berjalan di {capture_rate} Hz (auto-resample ke {stt_rate} Hz untuk STT)")
 
     print(f"\n🎤 [LISTENING] Silakan berbicara (maks {duration} detik)... Tekan Ctrl+C untuk berhenti lebih awal.")
     print("   Live Audio Stream: ", end="", flush=True)
 
     def audio_callback(indata, frames, time_info, status_flags):
         samples = indata.flatten()
-        stream.accept_waveform(sample_rate, samples)
+        if capture_rate != stt_rate:
+            samples = resample_to_16k(samples, capture_rate)
+        stream.accept_waveform(stt_rate, samples)
         while recognizer.is_ready(stream):
             recognizer.decode_stream(stream)
         partial = recognizer.get_result(stream).strip()
@@ -240,10 +293,10 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
             sys.stdout.write(f"\r   Live Audio Stream: \"\033[36m{partial}\033[0m...\" ")
             sys.stdout.flush()
 
-    chunk_size = int(sample_rate * 0.1)
+    chunk_size = int(capture_rate * 0.1)
     try:
         with sd.InputStream(
-            samplerate=sample_rate,
+            samplerate=capture_rate,
             channels=channels,
             dtype="float32",
             blocksize=chunk_size,
@@ -426,10 +479,14 @@ def run_gui_mode(duration: int = 5, device: int = None):
         ui_call(lambda: validation_label.config(text="$ validation: -", fg=FG_DIM))
         ui_call(lambda: robot_label.config(text="$ robot: waiting", fg=FG_DIM))
 
+        capture_rate = get_supported_sample_rate(device)
+
         def audio_callback(indata, frames, time_info, status):
             if stop_event.is_set():
                 return
             samples = indata.flatten()
+            if capture_rate != SAMPLE_RATE:
+                samples = resample_to_16k(samples, capture_rate)
             stream.accept_waveform(SAMPLE_RATE, samples)
             while recognizer.is_ready(stream):
                 recognizer.decode_stream(stream)
@@ -440,12 +497,12 @@ def run_gui_mode(duration: int = 5, device: int = None):
                 ui_call(lambda: stt_label.config(text=f"$ stt: \"{partial}...\"", fg=CYAN))
 
         try:
-            # Chunk size: 100 ms (1600 samples @ 16kHz)
-            chunk_size = int(SAMPLE_RATE * 0.1)
+            # Chunk size: 100 ms
+            chunk_size = int(capture_rate * 0.1)
 
             # Stream audio real-time: proses decode berjalan paralel saat berbicara
             with sd.InputStream(
-                samplerate=SAMPLE_RATE,
+                samplerate=capture_rate,
                 channels=CHANNELS,
                 dtype="float32",
                 blocksize=chunk_size,
