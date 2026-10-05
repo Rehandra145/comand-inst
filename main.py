@@ -278,10 +278,14 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
     if capture_rate != stt_rate:
         logger.info(f"[AUDIO] Hardware mic berjalan di {capture_rate} Hz (auto-resample ke {stt_rate} Hz untuk STT)")
 
-    print(f"\n[LISTENING] Silakan berbicara (maks {duration} detik)... Tekan Ctrl+C untuk berhenti lebih awal.")
+    print(f"\n[LISTENING] Silakan berbicara (maks {duration} detik)... Selesai bicara otomatis diproses.")
     print("   Live Audio Stream: ", end="", flush=True)
 
+    last_text = ""
+    last_change_time = None
+
     def audio_callback(indata, frames, time_info, status_flags):
+        nonlocal last_text, last_change_time
         samples = indata.flatten()
         if capture_rate != stt_rate:
             samples = resample_to_16k(samples, capture_rate)
@@ -290,6 +294,9 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
             recognizer.decode_stream(stream)
         partial = recognizer.get_result(stream).strip()
         if partial:
+            if partial != last_text:
+                last_text = partial
+                last_change_time = time.time()
             sys.stdout.write(f"\r   Live Audio Stream: \"\033[36m{partial}\033[0m...\" ")
             sys.stdout.flush()
 
@@ -305,7 +312,14 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
         ):
             start = time.time()
             while time.time() - start < duration:
-                time.sleep(0.05)
+                time.sleep(0.04)
+                # 1. Auto-stop jika engine STT mendeteksi endpoint (selesai bicara)
+                if recognizer.is_endpoint(stream):
+                    if recognizer.get_result(stream).strip():
+                        break
+                # 2. Auto-stop jika pengguna sudah berhenti bicara selama 0.7 detik
+                if last_change_time and (time.time() - last_change_time > 0.7):
+                    break
     except KeyboardInterrupt:
         pass
     except Exception as e:
