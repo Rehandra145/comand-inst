@@ -34,8 +34,7 @@ def speech_to_text_samples(samples: np.ndarray, sample_rate: int = STT_RATE) -> 
     """Proses audio langsung dari buffer memory (numpy float32) tanpa write/read file."""
     if samples.ndim > 1:
         samples = samples.squeeze()
-    if samples.dtype != np.float32:
-        samples = samples.astype(np.float32)
+    samples = np.ascontiguousarray(samples, dtype=np.float32)
 
     stream = recognizer.create_stream()
     stream.accept_waveform(sample_rate, samples)

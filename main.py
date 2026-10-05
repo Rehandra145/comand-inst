@@ -102,22 +102,22 @@ def resample_to_16k(samples, orig_sr: int):
     """Resample array audio float32 dari orig_sr ke 16000 Hz untuk Sherpa-ONNX."""
     import numpy as np
     if orig_sr == 16000 or len(samples) == 0:
-        return samples
+        return np.ascontiguousarray(samples, dtype=np.float32)
 
     if orig_sr == 48000:
-        # Decimation 3:1 (48000 Hz / 3 = 16000 Hz) — sangat cepat, tanpa latency
-        return samples[::3]
+        # Decimation 3:1 (48000 Hz / 3 = 16000 Hz) — C-contiguous array wajib untuk C++ pybind11!
+        return np.ascontiguousarray(samples[::3], dtype=np.float32)
 
     if orig_sr == 32000:
-        return samples[::2]
+        return np.ascontiguousarray(samples[::2], dtype=np.float32)
 
     # Interpolasi cepat untuk sample rate sembarang (misal 44100 Hz)
     target_length = int(len(samples) * 16000 / orig_sr)
     if target_length <= 0:
-        return np.array([], dtype=np.float32)
+        return np.zeros(0, dtype=np.float32)
     x_old = np.linspace(0, 1, len(samples), endpoint=False)
     x_new = np.linspace(0, 1, target_length, endpoint=False)
-    return np.interp(x_new, x_old, samples).astype(np.float32)
+    return np.ascontiguousarray(np.interp(x_new, x_old, samples), dtype=np.float32)
 
 
 def list_audio_devices():
@@ -268,6 +268,8 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
     """Rekam audio dari mikrofon dan proses real-time streaming di terminal."""
     device = get_effective_input_device(device)
     import sounddevice as sd
+    import numpy as np
+    import threading
     from stt import recognizer, create_stream
 
     capture_rate = get_supported_sample_rate(device)
@@ -283,22 +285,39 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
 
     last_text = ""
     last_change_time = None
+    stop_event = threading.Event()
 
     def audio_callback(indata, frames, time_info, status_flags):
         nonlocal last_text, last_change_time
-        samples = indata.flatten()
-        if capture_rate != stt_rate:
-            samples = resample_to_16k(samples, capture_rate)
-        stream.accept_waveform(stt_rate, samples)
-        while recognizer.is_ready(stream):
-            recognizer.decode_stream(stream)
-        partial = recognizer.get_result(stream).strip()
-        if partial:
-            if partial != last_text:
-                last_text = partial
-                last_change_time = time.time()
-            sys.stdout.write(f"\r   Live Audio Stream: \"\033[36m{partial}\033[0m...\" ")
-            sys.stdout.flush()
+        if stop_event.is_set():
+            return
+        try:
+            samples = np.ascontiguousarray(indata.flatten(), dtype=np.float32)
+            if capture_rate != stt_rate:
+                samples = resample_to_16k(samples, capture_rate)
+
+            stream.accept_waveform(stt_rate, samples)
+            while recognizer.is_ready(stream):
+                recognizer.decode_stream(stream)
+
+            # Cek endpoint detection langsung di audio thread (thread-safe, hindari race condition C++)
+            if recognizer.is_endpoint(stream):
+                partial = recognizer.get_result(stream).strip()
+                if partial:
+                    last_text = partial
+                    stop_event.set()
+                    return
+
+            partial = recognizer.get_result(stream).strip()
+            if partial:
+                if partial != last_text:
+                    last_text = partial
+                    last_change_time = time.time()
+                sys.stdout.write(f"\r   Live Audio Stream: \"\033[36m{partial}\033[0m...\" ")
+                sys.stdout.flush()
+        except Exception as err:
+            logger.debug(f"[AUDIO] Callback error: {err}")
+            stop_event.set()
 
     chunk_size = int(capture_rate * 0.1)
     try:
@@ -311,14 +330,11 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
             callback=audio_callback,
         ):
             start = time.time()
-            while time.time() - start < duration:
-                time.sleep(0.04)
-                # 1. Auto-stop jika engine STT mendeteksi endpoint (selesai bicara)
-                if recognizer.is_endpoint(stream):
-                    if recognizer.get_result(stream).strip():
-                        break
-                # 2. Auto-stop jika pengguna sudah berhenti bicara selama 0.7 detik
-                if last_change_time and (time.time() - last_change_time > 0.7):
+            while time.time() - start < duration and not stop_event.is_set():
+                time.sleep(0.05)
+                # Auto-stop jika pengguna sudah hening selama 0.8 detik setelah berucap
+                if last_change_time and (time.time() - last_change_time > 0.8):
+                    stop_event.set()
                     break
     except KeyboardInterrupt:
         pass
@@ -326,7 +342,8 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
         print(f"\n[ERROR Microphone]: {e}")
         return
 
-    text = recognizer.get_result(stream).strip()
+    # Ambil hasil transkripsi HANYA setelah stream audio ditutup (menjamin thread-safety mutlak)
+    text = recognizer.get_result(stream).strip() or last_text
     print(f"\r   Transkripsi Akhir: \"\033[32m{text}\033[0m\"                                  \n")
     if not text:
         print("[WARN] Tidak ada ucapan/suara yang terdeteksi.")
@@ -498,17 +515,26 @@ def run_gui_mode(duration: int = 5, device: int = None):
         def audio_callback(indata, frames, time_info, status):
             if stop_event.is_set():
                 return
-            samples = indata.flatten()
-            if capture_rate != SAMPLE_RATE:
-                samples = resample_to_16k(samples, capture_rate)
-            stream.accept_waveform(SAMPLE_RATE, samples)
-            while recognizer.is_ready(stream):
-                recognizer.decode_stream(stream)
+            try:
+                samples = np.ascontiguousarray(indata.flatten(), dtype=np.float32)
+                if capture_rate != SAMPLE_RATE:
+                    samples = resample_to_16k(samples, capture_rate)
+                stream.accept_waveform(SAMPLE_RATE, samples)
+                while recognizer.is_ready(stream):
+                    recognizer.decode_stream(stream)
 
-            # Live partial text update ke GUI
-            partial = recognizer.get_result(stream).strip()
-            if partial:
-                ui_call(lambda: stt_label.config(text=f"$ stt: \"{partial}...\"", fg=CYAN))
+                if recognizer.is_endpoint(stream):
+                    if recognizer.get_result(stream).strip():
+                        stop_event.set()
+                        return
+
+                # Live partial text update ke GUI
+                partial = recognizer.get_result(stream).strip()
+                if partial:
+                    ui_call(lambda: stt_label.config(text=f"$ stt: \"{partial}...\"", fg=CYAN))
+            except Exception as err:
+                logger.debug(f"[AUDIO] GUI callback error: {err}")
+                stop_event.set()
 
         try:
             # Chunk size: 100 ms
