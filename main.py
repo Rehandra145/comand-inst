@@ -99,6 +99,21 @@ def get_supported_sample_rate(device: int = None) -> int:
         return 16000
 
 
+def get_optimal_channels(device: int = None, rate: int = 16000) -> int:
+    """Deteksi jumlah channel minimum yang didukung hardware (1 atau max_channels)."""
+    import sounddevice as sd
+    try:
+        sd.check_input_settings(device=device, samplerate=rate, channels=1, dtype="float32")
+        return 1
+    except Exception:
+        try:
+            dev_info = sd.query_devices(device, "input")
+            max_ch = int(dev_info.get("max_input_channels", 2))
+            return max_ch if max_ch > 0 else 1
+        except Exception:
+            return 1
+
+
 def resample_to_16k(samples, orig_sr: int):
     """Resample array audio float32 dari orig_sr ke 16000 Hz untuk Sherpa-ONNX."""
     import numpy as np
@@ -112,7 +127,14 @@ def resample_to_16k(samples, orig_sr: int):
     if orig_sr == 32000:
         return np.ascontiguousarray(samples[::2], dtype=np.float32)
 
-    # Interpolasi cepat untuk sample rate sembarang (misal 44100 Hz)
+    if orig_sr == 44100:
+        try:
+            from scipy.signal import resample_poly
+            return np.ascontiguousarray(resample_poly(samples, 160, 441), dtype=np.float32)
+        except ImportError:
+            pass
+
+    # Interpolasi cepat untuk sample rate sembarang (misal 44100 Hz tanpa scipy)
     target_length = int(len(samples) * 16000 / orig_sr)
     if target_length <= 0:
         return np.zeros(0, dtype=np.float32)
@@ -170,9 +192,10 @@ def test_mic_hardware(device: int = None, duration: int = 3):
     dev_name = dev_info.get("name", "Unknown")
     channels = dev_info.get("max_input_channels", 0)
     capture_sr = get_supported_sample_rate(device)
+    optimal_channels = get_optimal_channels(device, capture_sr)
 
     print(f"\n1. Perangkat Terpilih : [{device if device is not None else 'Default'}] {dev_name}")
-    print(f"   Jumlah Channel     : {channels}")
+    print(f"   Jumlah Channel     : {channels} (Menggunakan: {optimal_channels} channel)")
     print(f"   Hardware Sample Rate: {capture_sr} Hz {'(akan di-resample otomatis ke 16000 Hz untuk STT)' if capture_sr != 16000 else ''}")
 
     print(f"\n2. Merekam suara sampel selama {duration} detik...")
@@ -182,7 +205,7 @@ def test_mic_hardware(device: int = None, duration: int = 3):
         recording = sd.rec(
             int(duration * capture_sr),
             samplerate=capture_sr,
-            channels=1,
+            channels=optimal_channels,
             dtype="float32",
             device=device,
         )
@@ -280,8 +303,8 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
     from stt import recognizer, create_stream
 
     capture_rate = get_supported_sample_rate(device)
+    channels = get_optimal_channels(device, capture_rate)
     stt_rate = 16000
-    channels = 1
     stream = create_stream()
 
     if capture_rate != stt_rate:
@@ -299,7 +322,11 @@ def record_and_process_cli(pipeline, duration: int = 5, device: int = None):
         if stop_event.is_set():
             return
         try:
-            samples = np.ascontiguousarray(indata.flatten(), dtype=np.float32)
+            if indata.shape[1] > 1:
+                samples = np.ascontiguousarray(indata[:, 0], dtype=np.float32)
+            else:
+                samples = np.ascontiguousarray(indata.flatten(), dtype=np.float32)
+                
             if capture_rate != stt_rate:
                 samples = resample_to_16k(samples, capture_rate)
 
@@ -523,12 +550,17 @@ def run_gui_mode(duration: int = 5, device: int = None):
         ui_call(lambda: robot_label.config(text="$ robot: waiting", fg=FG_DIM))
 
         capture_rate = get_supported_sample_rate(device)
+        optimal_channels = get_optimal_channels(device, capture_rate)
 
         def audio_callback(indata, frames, time_info, status):
             if stop_event.is_set():
                 return
             try:
-                samples = np.ascontiguousarray(indata.flatten(), dtype=np.float32)
+                if indata.shape[1] > 1:
+                    samples = np.ascontiguousarray(indata[:, 0], dtype=np.float32)
+                else:
+                    samples = np.ascontiguousarray(indata.flatten(), dtype=np.float32)
+                    
                 if capture_rate != SAMPLE_RATE:
                     samples = resample_to_16k(samples, capture_rate)
                 stream.accept_waveform(SAMPLE_RATE, samples)
@@ -558,7 +590,7 @@ def run_gui_mode(duration: int = 5, device: int = None):
             # Stream audio real-time: proses decode berjalan paralel saat berbicara
             with sd.InputStream(
                 samplerate=capture_rate,
-                channels=CHANNELS,
+                channels=optimal_channels,
                 dtype="float32",
                 blocksize=chunk_size,
                 device=device,
@@ -637,8 +669,10 @@ def run_gui_mode(duration: int = 5, device: int = None):
             ui_call(apply_results)
 
         except Exception as e:
+            err_msg = str(e)
+            logger.error(f"[GUI ERROR] {err_msg}")
             ui_call(lambda: status_label.config(text="> status: error", fg=RED))
-            ui_call(lambda: messagebox.showerror("Error", str(e)))
+            ui_call(lambda e_msg=err_msg: messagebox.showerror("Error", e_msg))
 
         finally:
             is_recording = False

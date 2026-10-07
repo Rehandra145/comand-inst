@@ -19,7 +19,7 @@ from nlu.slot_extractor import (
 )
 from nlu.command_builder import build_command
 from nlu.validator import validate_command
-from nlu.ros2_adapter import BaseROS2Adapter, MockROS2Adapter
+from nlu.ros2_adapter import BaseROS2Adapter, SocketROS2Adapter
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,8 @@ class NLUPipeline:
     ):
         self.intent_classifier = intent_classifier or KeywordIntentClassifier()
         self.slot_extractor = slot_extractor or RuleBasedSlotExtractor()
-        self.ros2_adapter = ros2_adapter or MockROS2Adapter()
+        # Set port socket ke IP robot anda, untuk dev lokal gunakan 127.0.0.1 port 5000
+        self.ros2_adapter = ros2_adapter or SocketROS2Adapter(host="127.0.0.1", port=5000)
 
     def process(self, text: str) -> Dict[str, Any]:
         """

@@ -85,3 +85,44 @@ class MockROS2Adapter(BaseROS2Adapter):
             logger.info(f"[ROS2] [ROBOT] mengikuti {person}")
 
         return True
+
+import socket
+import json
+import threading
+
+# =========================
+# SOCKET (TCP) IMPLEMENTATION
+# =========================
+
+class SocketROS2Adapter(BaseROS2Adapter):
+    """
+    Adapter yang mengirim perintah dalam bentuk JSON string 
+    melalui TCP Socket ke Node ROS 2 di robot.
+    Cocok untuk setup lintas OS (Windows -> Ubuntu).
+    """
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 5000):
+        self.host = host
+        self.port = port
+        logger.info(f"Initialized SocketROS2Adapter targeting {self.host}:{self.port}")
+
+    def send_command(self, command: Dict[str, Any]) -> bool:
+        status = command.get("status", "UNKNOWN")
+        if status != "VALID":
+            logger.warning(f"[Socket] Command tidak dikirim (status={status})")
+            return False
+
+        # Membuat koneksi socket baru setiap kali mengirim
+        # Pendekatan ini aman untuk menjaga koneksi tidak hang jika terputus
+        payload = json.dumps(command)
+        
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2.0)  # timeout 2 detik
+                s.connect((self.host, self.port))
+                s.sendall(payload.encode('utf-8'))
+            logger.info(f"[Socket] Berhasil mengirim: {payload}")
+            return True
+        except Exception as e:
+            logger.error(f"[Socket] Gagal mengirim command ke {self.host}:{self.port} - Error: {e}")
+            return False
