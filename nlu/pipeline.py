@@ -42,7 +42,7 @@ class NLUPipeline:
         self.intent_classifier = intent_classifier or KeywordIntentClassifier()
         self.slot_extractor = slot_extractor or RuleBasedSlotExtractor()
         # Set port socket ke IP robot anda, untuk dev lokal gunakan 127.0.0.1 port 5000
-        self.ros2_adapter = ros2_adapter or SocketROS2Adapter(host="127.0.0.1", port=5000)
+        self.ros2_adapter = ros2_adapter or SocketROS2Adapter(host="10.107.245.221", port=5000)
 
     def process(self, text: str) -> Dict[str, Any]:
         """

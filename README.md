@@ -14,10 +14,15 @@ Sistem pemrosesan perintah suara (*Voice-to-Command*) bahasa Indonesia untuk rob
   - [2.5 Middleware Interfacing: ROS 2 Publish-Subscribe Architecture](#25-middleware-interfacing-ros-2-publish-subscribe-architecture)
 - [3. Format Structured Command & Skema Data](#3-format-structured-command--skema-data)
 - [4. Intent & Slot Mapping](#4-intent--slot-mapping)
-- [5. Desain GUI & Real-Time Streaming](#5-desain-gui--real-time-streaming)
-- [6. Struktur Direktori Proyek](#6-struktur-direktori-proyek)
-- [7. Panduan Instalasi & Menjalankan](#7-panduan-instalasi--menjalankan)
-- [8. Pengujian & Verifikasi](#8-pengujian--verifikasi)
+- [5. Mode Interaktif Non-Streaming & Multi-Turn Dialog (TTS ↔ STT)](#5-mode-interaktif-non-streaming--multi-turn-dialog-tts--stt)
+  - [5.1 Arsitektur Sequential & Eliminasi Race Condition Audio](#51-arsitektur-sequential--eliminasi-race-condition-audio)
+  - [5.2 Resource Scheduling & Task Pinning](#52-resource-scheduling--task-pinning)
+  - [5.3 In-Memory Audio Caching & Background Pre-Warming](#53-in-memory-audio-caching--background-pre-warming)
+  - [5.4 Penggabungan Konteks Dialog Multi-Turn](#54-penggabungan-konteks-dialog-multi-turn)
+- [6. Desain GUI & Mode Operasi](#6-desain-gui--mode-operasi)
+- [7. Struktur Direktori Proyek](#7-struktur-direktori-proyek)
+- [8. Panduan Instalasi & Menjalankan](#8-panduan-instalasi--menjalankan)
+- [9. Pengujian & Verifikasi](#9-pengujian--verifikasi)
 
 ---
 
@@ -285,7 +290,89 @@ Format dictionary command standar yang dihasilkan oleh pipeline:
 
 ---
 
-## 5. Desain GUI & Real-Time Streaming
+## 5. Mode Interaktif Non-Streaming & Multi-Turn Dialog (TTS ↔ STT)
+
+Selain mode streaming konvensional (`[ TALK ]`), sistem menyediakan **Mode Tugas Dialog Interaktif Non-Streaming**. Mode ini dirancang khusus untuk meminimalisir *race condition* pada perangkat audio (ALSA) dan menghemat utilisasi CPU pada single-board computer seperti **Raspberry Pi 4 Model B**.
+
+### 5.1 Arsitektur Sequential & Eliminasi Race Condition Audio
+
+Pada robot layanan, speaker (TTS) dan mikrofon (STT) sering kali saling berebut resource audio jika berjalan bersamaan (*ALSA duplex contention / xrun*), atau suara robot yang keluar dari speaker terdengar kembali oleh mikrofon (*self-echo acoustic loop*).
+
+Arsitektur penjadwalan sekuensial mengisolasi penuh fase audio:
+1. **TTS Greeting**: Robot menyapa *"Halo, ada yang bisa saya bantu hari ini?"*.
+2. **Acoustic Settling (150ms)**: Jeda waktu hening singkat setelah TTS selesai untuk membiarkan pantulan/gema suara di ruangan menghilang sempurna.
+3. **STT Single-Shot Recording**: Mikrofon aktif mendengarkan perintah awal pengguna (misal: *"antarkan obat ini"*).
+4. **NLU Verification & Clarification**: Jika status perintah `INCOMPLETE` (misal slot `location` kosong):
+   - Robot berbicara via TTS menanyakan slot yang hilang: *"Ke ruangan berapa?"*
+   - Mikrofon mendengarkan jawaban spesifik pengguna (misal: *"204"* atau *"ke ruang 204"*).
+   - Dialog context merger secara otomatis menggabungkan konteks: *"antarkan obat ini ke ruang 204"*.
+5. **TTS Konfirmasi Akhir**: Robot mengonfirmasi aksi (*"Baik, saya akan menuju ruang 204."*) dan meneruskan payload ke ROS 2 adapter.
+
+```mermaid
+sequenceDiagram
+    participant U as Pengguna
+    participant APP as Terminal / GUI
+    participant SCHED as Resource Scheduler
+    participant TTS as TTS Engine (Cached)
+    participant MIC as Microphone / STT
+    participant NLU as NLU Pipeline
+
+    U->>APP: Tekan [ TUGAS ] / CLI --task
+    APP->>SCHED: enter_tts()
+    APP->>TTS: "Halo, ada yang bisa saya bantu hari ini?"
+    TTS-->>APP: Audio selesai diputar
+    APP->>SCHED: exit_tts() [Settling Delay 150ms]
+
+    APP->>SCHED: enter_stt() [Boost Thread Priority]
+    APP->>MIC: Buka stream mikrofon
+    U->>MIC: "Antarkan obat ini"
+    MIC-->>APP: "antarkan obat ini"
+    APP->>SCHED: exit_stt() [Tutup stream mikrofon]
+
+    APP->>NLU: process("antarkan obat ini")
+    NLU-->>APP: Status INCOMPLETE (missing: location)
+
+    APP->>SCHED: enter_tts()
+    APP->>TTS: "Ke ruangan berapa?"
+    TTS-->>APP: Audio selesai diputar
+    APP->>SCHED: exit_tts() [Settling Delay 150ms]
+
+    APP->>SCHED: enter_stt()
+    APP->>MIC: Buka stream mikrofon
+    U->>MIC: "204"
+    MIC-->>APP: "204"
+    APP->>SCHED: exit_stt()
+
+    APP->>NLU: merge_dialog_context -> process("antarkan obat ini ke ruang 204")
+    NLU-->>APP: Status VALID (intent: NAVIGATE, location: ruang 204)
+
+    APP->>SCHED: enter_tts()
+    APP->>TTS: "Baik, saya akan menuju ruang 204."
+    TTS-->>APP: Audio konfirmasi selesai diputar
+    APP->>SCHED: exit_tts()
+```
+
+### 5.2 Resource Scheduling & Task Pinning (`scheduler.py`)
+
+- **OS Thread Priority Boosting**: Thread capture audio (`sd.InputStream`) dan worker decode STT/TTS dinaikkan prioritasnya menjadi **Above Normal** (`SetThreadPriority` di Windows / `os.nice` di Linux). Ini menjamin tidak terjadi audio dropout saat background OS process sedang aktif.
+- **Task Pinning (CPU Core Affinity)**: Tersedia fungsi `pin_current_thread_to_cores()` menggunakan native Linux `os.sched_setaffinity` (ideal untuk 4-Core Cortex-A72 pada Raspberry Pi 4) atau `SetThreadAffinityMask` pada Windows.
+- **Audio Mutual Exclusion**: Menjamin hanya satu audio I/O stream (Speaker ATAU Mikrofon) yang mengakses driver audio pada satu waktu.
+
+### 5.3 In-Memory Audio Caching & Background Pre-Warming (`tts.py`)
+
+- **Zero-Latency In-Memory Cache**: Kalimat sistem berulang (*"Halo, ada yang bisa saya bantu hari ini?"*, *"Ke ruangan berapa?"*, *"Baik, saya berhenti."*, dll.) disimpan di memori RAM sebagai audio array float32. Waktu sintesis ONNX untuk kalimat umum berkurang dari ~60–800ms menjadi **0.001 ms (0% CPU cost)**.
+- **Background Pre-Warming (`warmup_async()`)**: Engine Sherpa-ONNX Piper VITS dan cache kalimat umum diinisialisasi pada background daemon thread saat aplikasi pertama kali dijalankan. Pengguna merasakan responsivitas instan tanpa *cold-start delay* saat menekan tombol atau menjalankan perintah tugas.
+
+### 5.4 Penggabungan Konteks Dialog Multi-Turn (`merge_dialog_context`)
+
+Fungsi penggabung konteks menangani variasi jawaban pengguna:
+- **Digit Normalization**: Jawaban murni angka seperti `"204"` otomatis dipetakan menjadi `"ruang 204"`.
+- **Preposition Guard**: Jawaban yang sudah diawali preposisi (`"ke ruang 204"`) tidak akan menghasilkan duplikasi kata depan (*"antarkan obat ini ke ke ruang 204"* dicegah).
+- **Slot Routing**: Jawaban arah (`"kanan"` $\rightarrow$ `"ke kanan"`) dan orang (`"dokter budi"` $\rightarrow$ `"ikuti dokter budi"`) digabungkan sesuai semantik masing-masing intent.
+
+---
+
+## 6. Desain GUI & Mode Operasi
 
 Antarmuka GUI dibangun menggunakan **Tkinter** dengan konsep **Matte Charcoal Theme**:
 
@@ -293,23 +380,27 @@ Antarmuka GUI dibangun menggunakan **Tkinter** dengan konsep **Matte Charcoal Th
   - Background Utama: `#18191c` (*deep matte charcoal*)
   - Terminal Panel Card: `#202226` (*elevated dark card*)
   - Separator & Borders: `#2f3238` (*subtle charcoal divider*)
-  - Aksen Status: Emerald Green (`#45d686`), Sky Cyan (`#38bdf8`), Amber Yellow (`#fbbf24`), Coral Red (`#f87171`)
-- **Tipografi**:
-  - Menggunakan font monospace **JetBrains Mono** untuk estetika developer/terminal.
-- **Interaksi Tombol**:
-  - Tombol bersifat *toggle* (`[ TALK ]` $\rightarrow$ `[ STOP LISTENING ]`).
-  - Pemrosesan audio dilakukan live; pengguna dapat menekan stop kapan saja untuk menghentikan rekaman sebelum batas waktu 5 detik.
+  - Aksen Status: Emerald Green (`#45d686`), Sky Cyan (`#38bdf8`), Amber Yellow (`#fbbf24`), Coral Red (`#f87171`), Mode Orange (`#fb923c`)
+- **Dua Mode Interaksi Utama**:
+  1. **`[ TALK ]` (Streaming STT)**: Cocok untuk pengujian cepat 1-turn perintah langsung.
+  2. **`[ TUGAS ]` (Interactive Multi-Turn)**: Mode dialog interaktif berurutan dengan suara TTS, pengisian slot otomatis, dan log percakapan visual.
+- **Mutual Exclusion Tombol**: Menekan salah satu mode otomatis mengunci (*disable*) mode lainnya untuk mencegah perebutan resource mikrofon/speaker. Tombol `[ BATALKAN ]` tersedia untuk menghentikan alur tugas kapan saja.
 
 ---
 
-## 6. Struktur Direktori Proyek
+## 7. Struktur Direktori Proyek
 
 ```text
 command-inst/
 ├── config.py              # Konfigurasi model STT, sample rate, & jumlah thread CPU
-├── main.py                # Titik masuk utama aplikasi: GUI (Tkinter) & CLI mode
+├── main.py                # Titik masuk utama: GUI Tkinter, CLI Tugas, Streaming STT
 ├── stt.py                 # Engine STT Sherpa-ONNX streaming-native (in-memory)
-├── model/                 # Model ONNX RNN-T (encoder, decoder, joiner, tokens)
+├── tts.py                 # Engine TTS offline (Piper VITS), audio cache, & warmup
+├── scheduler.py           # Resource scheduler, task pinning, thread priority, mutual exclusion
+├── download_tts_model.py  # Script downloader & verifikasi model TTS bahasa Indonesia
+├── model/
+│   ├── ...                # Model ONNX RNN-T (encoder, decoder, joiner, tokens)
+│   └── tts/               # Model ONNX Piper VITS (id_ID-news_tts-medium.onnx, tokens, data)
 ├── nlu/
 │   ├── command_builder.py # Penggabung intent dan slots menjadi JSON terstruktur
 │   ├── entities.py        # Master data nama ruangan, poli, arah, dan personil RS
@@ -328,11 +419,12 @@ command-inst/
 
 ---
 
-## 7. Panduan Instalasi & Menjalankan
+## 8. Panduan Instalasi & Menjalankan
 
 ### Persyaratan Sistem
 - Python `>= 3.10`
 - Perangkat mikrofon yang terhubung (untuk mode GUI / suara langsung)
+- Speaker / Jack audio 3.5mm / HDMI (untuk suara output robot)
 
 ### Instalasi Dependensi
 
@@ -356,23 +448,52 @@ pip install -r requirements.txt
 > sudo apt update && sudo apt install -y portaudio19-dev libasound2-dev libsndfile1 python3-tk
 > ```
 
+### Setup Model Offline TTS (Wajib untuk Mode Tugas)
+Untuk mengaktifkan suara robot pada Mode Tugas (baik GUI maupun CLI), unduh model Sherpa-ONNX Piper VITS bahasa Indonesia:
+```bash
+uv run python download_tts_model.py
+# atau:
+python download_tts_model.py
+```
+Model akan diekstrak secara otomatis ke `model/tts/` (~60 MB).
+
+---
 
 ### Menjalankan Program
 
-#### 1. Mode CLI Interaktif (Rekomendasi untuk Ubuntu Server 22.04 LTS / Headless):
-Jika dijalankan di Ubuntu Server tanpa monitor/X11, program akan **otomatis mendeteksi lingkungan headless** dan membuka menu CLI interaktif:
+#### 1. Mode Tugas Dialog Interaktif (Terminal CLI):
+Jalankan alur dialog sekuensial langsung dari terminal (TTS menyapa $\rightarrow$ rekam perintah $\rightarrow$ tanya klarifikasi slot jika kurang $\rightarrow$ TTS konfirmasi):
 ```bash
-# Menjalankan menu interaktif di terminal:
-python main.py --cli
-# (Atau cukup 'python main.py' saat di server headless)
+uv run python main.py --task
+# atau alias:
+uv run python main.py --tugas
 ```
 
-Menu interaktif menyediakan opsi:
-- `[1]` Bicara via mikrofon (streaming real-time STT langsung di terminal)
-- `[2]` Ketik perintah teks manual untuk menguji NLU
-- `[3]` Cek daftar perangkat mikrofon yang terhubung
+#### 2. Mode Menu CLI Interaktif (Terminal Headless / Ubuntu Server):
+Jika dijalankan di Ubuntu Server tanpa monitor/X11, program akan otomatis membuka menu terminal interaktif:
+```bash
+uv run python main.py --cli
+```
 
-#### 2. Mode Mikrofon Langsung via Terminal (CLI):
+Pilihan menu yang tersedia:
+- `[1]` Mode Tugas Dialog Interaktif (TTS ↔ STT Sequential)
+- `[2]` Bicara Langsung via Mikrofon (Streaming STT + NLU)
+- `[3]` Ketik Perintah Teks Manual
+- `[4]` List Perangkat Input Audio
+- `[5]` Tes Diagnosa & Level Volume Mikrofon
+- `[q]` Keluar
+
+#### 3. Mode GUI Tkinter (Desktop):
+```bash
+uv run python main.py
+# atau:
+uv run python main.py --gui
+```
+- Tekan **`[ TALK ]`** untuk merekam suara secara live streaming STT.
+- Tekan **`[ TUGAS ]`** untuk memulai dialog tugas interaktif dengan suara offline TTS dan penanganan slot otomatis.
+- Tekan **`[ BATALKAN ]`** kapan saja untuk membatalkan dialog tugas.
+
+#### 4. Mode Mikrofon Langsung 1-Kali (Streaming Terminal):
 ```bash
 # Rekam suara langsung selama 5 detik:
 python main.py --mic
@@ -384,7 +505,7 @@ python main.py --mic --duration 7
 python main.py --mic --device 1
 ```
 
-#### 3. Cek & Diagnosa Driver Mikrofon:
+#### 5. Cek & Diagnosa Driver Mikrofon:
 ```bash
 # Lihat daftar seluruh input mikrofon yang terdeteksi
 python main.py --list-devices
@@ -393,12 +514,7 @@ python main.py --list-devices
 python main.py --test-mic
 ```
 
-#### 4. Mode GUI (Desktop / Raspberry Pi dengan Layar):
-```bash
-python main.py --gui
-```
-
-#### 5. Mode CLI / Teks Langsung (Tanpa Mikrofon, untuk Pengujian Cepat):
+#### 6. Mode Teks Langsung (Tanpa Mikrofon, untuk Pengujian Cepat NLU):
 ```bash
 # Perintah navigasi ruangan bernomor (digit mode)
 python main.py --text "antar ke ruang satu nol empat"
@@ -421,7 +537,7 @@ python main.py --text "berhenti sekarang"
 
 ---
 
-## 8. Pengujian & Verifikasi
+## 9. Pengujian & Verifikasi
 
 Proyek ini dilengkapi test suite komprehensif yang mencakup pengujian intent, slot extraction, validasi kelengkapan, validasi ruangan, hingga skenario typo fonetik STT.
 
