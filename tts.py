@@ -3,7 +3,7 @@ TTS Module — Sherpa-ONNX Offline Text-to-Speech (Bahasa Indonesia).
 
 Arsitektur sequential & resource-optimized:
   - Hanya satu audio output pada satu waktu (mutual exclusion).
-  - Audio Cache (in-memory LRU-like): kalimat umum disimpan di RAM (0 ms latency inference).
+  - Audio Cache 2 level: RAM (instan) + disk `.tts_cache/` (persisten antar restart).
   - Background Warmup: engine dimuat di thread latar belakang agar interaksi pertama instan.
   - Terintegrasi dengan ResourceScheduler (settling delay, thread priority, mutual exclusion).
 
@@ -52,9 +52,19 @@ TTS_NUM_THREADS = 2
 SPEAKER_DEVICE_ALSA = "plughw:2,0"
 
 # Kalimat umum yang di-cache saat warmup agar respons instan (0 ms inference)
+try:
+    from responses import (
+        GREETINGS as _GREETINGS,
+        ASK_LOCATION as _ASK_LOCATION,
+        UNKNOWN_INTENT as _UNKNOWN_INTENT,
+    )
+except ImportError:
+    _GREETINGS, _ASK_LOCATION, _UNKNOWN_INTENT = (), (), ()
+
 PREWARM_PHRASES = (
-    "Halo, ada yang bisa saya bantu hari ini?",
-    "Ke ruangan berapa?",
+    *_GREETINGS,
+    *_ASK_LOCATION,
+    *_UNKNOWN_INTENT,
     "Ke arah mana?",
     "Siapa yang harus saya ikuti?",
     "Baik, saya berhenti.",
@@ -78,6 +88,71 @@ _audio_cache: Dict[Tuple[str, float, int], Tuple[np.ndarray, int]] = {}
 _cache_lock = threading.Lock()
 _is_warming_up = False
 
+# Batas jumlah entri di cache RAM (cache disk tidak dibatasi)
+MEMORY_CACHE_MAX = 200
+
+
+# =========================
+# PERSISTENT DISK CACHE
+# =========================
+# Hasil sintesis disimpan sebagai file WAV di disk, sehingga setelah restart
+# program kalimat yang pernah diucapkan tidak perlu disintesis ulang.
+
+TTS_MODEL_FILE = "id_ID-news_tts-medium.onnx"
+TTS_DISK_CACHE_DIR = Path(".tts_cache")
+
+
+def _disk_cache_path(key: Tuple[str, float, int]) -> Path:
+    """Path file WAV cache untuk sebuah key (hash dari teks + speed + speaker + model)."""
+    import hashlib
+    raw = f"{TTS_MODEL_FILE}|{key[0]}|{key[1]}|{key[2]}".encode("utf-8")
+    return TTS_DISK_CACHE_DIR / f"{hashlib.sha1(raw).hexdigest()}.wav"
+
+
+def _disk_cache_load(key: Tuple[str, float, int]) -> Optional[Tuple[np.ndarray, int]]:
+    """Baca audio dari cache disk. Return None jika tidak ada / rusak."""
+    path = _disk_cache_path(key)
+    if not path.exists():
+        return None
+    try:
+        import soundfile as sf
+        samples, sample_rate = sf.read(str(path), dtype="float32")
+        return samples, sample_rate
+    except Exception as e:
+        logger.warning(f"[TTS] Cache disk rusak, dihapus: {path.name} ({e})")
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _disk_cache_save(key: Tuple[str, float, int], samples: np.ndarray, sample_rate: int):
+    """Simpan audio ke cache disk (atomic write via file sementara)."""
+    try:
+        import soundfile as sf
+        TTS_DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        path = _disk_cache_path(key)
+        tmp = path.with_suffix(".tmp")
+        sf.write(str(tmp), samples, sample_rate, subtype="PCM_16", format="WAV")
+        os.replace(tmp, path)
+    except Exception as e:
+        logger.warning(f"[TTS] Gagal menyimpan cache disk: {e}")
+
+
+def _memory_cache_put(key: Tuple[str, float, int], samples: np.ndarray, sample_rate: int):
+    with _cache_lock:
+        if key in _audio_cache or len(_audio_cache) < MEMORY_CACHE_MAX:
+            _audio_cache[key] = (samples, sample_rate)
+
+
+def clear_cache():
+    """Hapus seluruh cache (RAM + disk), misal setelah ganti model / speed."""
+    import shutil
+    with _cache_lock:
+        _audio_cache.clear()
+    shutil.rmtree(TTS_DISK_CACHE_DIR, ignore_errors=True)
+
 
 def _get_tts_engine():
     """Lazy-load TTS engine sekali saat pertama dipakai (thread-safe singleton)."""
@@ -95,7 +170,7 @@ def _get_tts_engine():
             logger.error("[TTS] sherpa-onnx belum terinstal. Jalankan: pip install sherpa-onnx")
             return None
 
-        model_path = TTS_MODEL_DIR / "id_ID-news_tts-medium.onnx"
+        model_path = TTS_MODEL_DIR / TTS_MODEL_FILE
         tokens_path = TTS_MODEL_DIR / "tokens.txt"
         data_dir = TTS_MODEL_DIR / "espeak-ng-data"
 
@@ -144,35 +219,171 @@ def warmup() -> bool:
 
     _is_warming_up = True
     try:
-        engine = _get_tts_engine()
-        if engine is None:
-            return False
-
         t0 = time.time()
-        cached_count = 0
+
+        # 1) Muat dulu dari cache disk (cepat, tanpa perlu load model)
+        missing = []
+        disk_count = 0
         for phrase in PREWARM_PHRASES:
             key = (phrase.strip().lower(), round(TTS_SPEED, 2), TTS_SPEAKER_ID)
             with _cache_lock:
                 if key in _audio_cache:
                     continue
+            loaded = _disk_cache_load(key)
+            if loaded is not None:
+                _memory_cache_put(key, *loaded)
+                disk_count += 1
+            else:
+                missing.append((phrase.strip(), key))
 
-            audio = engine.generate(phrase.strip(), sid=TTS_SPEAKER_ID, speed=TTS_SPEED)
+        # 2) Load engine (agar kalimat dinamis yang belum di-cache tetap cepat)
+        engine = _get_tts_engine()
+        if engine is None:
+            return disk_count > 0
+
+        # 3) Sintesis kalimat yang belum ada di cache, simpan ke RAM + disk
+        synth_count = 0
+        for phrase, key in missing:
+            with _generate_lock:
+                audio = engine.generate(phrase, sid=TTS_SPEAKER_ID, speed=TTS_SPEED)
             samples = np.array(audio.samples, dtype=np.float32)
-            with _cache_lock:
-                _audio_cache[key] = (samples, audio.sample_rate)
-            cached_count += 1
+            _memory_cache_put(key, samples, audio.sample_rate)
+            _disk_cache_save(key, samples, audio.sample_rate)
+            synth_count += 1
 
         elapsed = time.time() - t0
-        logger.info(f"[TTS] Warmup selesai: {cached_count} kalimat di-cache dalam {elapsed:.2f}s")
+        logger.info(
+            f"[TTS] Warmup selesai dalam {elapsed:.2f}s: "
+            f"{disk_count} dari cache disk, {synth_count} disintesis baru"
+        )
         return True
     finally:
         _is_warming_up = False
 
 
-def warmup_async():
-    """Jalankan warmup di background daemon thread."""
-    t = threading.Thread(target=warmup, name="TTS-Warmup", daemon=True)
+def warmup_async(precache_rooms: bool = True):
+    """
+    Jalankan warmup di background daemon thread.
+    Setelah warmup selesai, lanjut pre-cache kalimat konfirmasi semua ruangan
+    (hanya yang belum ada di cache disk).
+    """
+    def _run():
+        warmup()
+        if precache_rooms:
+            precache_room_phrases()
+
+    t = threading.Thread(target=_run, name="TTS-Warmup", daemon=True)
     t.start()
+
+
+# =========================
+# BACKGROUND PRE-CACHE (KONFIRMASI RUANGAN)
+# =========================
+
+# Serialisasi akses ke engine.generate (engine dipakai bersama oleh banyak thread)
+_generate_lock = threading.Lock()
+# Counter request sintesis foreground; pre-cache background mengalah jika > 0
+_foreground_requests = 0
+_foreground_lock = threading.Lock()
+_precache_running = False
+
+VALID_ROOMS_JSON = Path(__file__).resolve().parent / "nlu" / "valid_rooms.json"
+
+
+def _load_room_names() -> list:
+    import json
+    try:
+        with open(VALID_ROOMS_JSON, "r", encoding="utf-8") as f:
+            return list(json.load(f).get("rooms", []))
+    except Exception as e:
+        logger.warning(f"[TTS] Gagal membaca daftar ruangan: {e}")
+        return []
+
+
+def _lower_current_thread_priority():
+    """Turunkan prioritas thread ini (Linux: nice 19) agar tidak mengganggu STT/TTS."""
+    if sys.platform.startswith("linux"):
+        try:
+            os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 19)
+        except Exception:
+            pass
+
+
+def _system_busy() -> bool:
+    """True jika ada sintesis foreground atau mic sedang mendengarkan."""
+    if _foreground_requests > 0:
+        return True
+    if scheduler is not None:
+        stage = getattr(scheduler.current_stage, "value", "")
+        if stage == "STT_LISTENING":
+            return True
+    return False
+
+
+def precache_room_phrases():
+    """
+    Pre-sintesis semua variasi kalimat konfirmasi navigasi untuk setiap ruangan
+    dan simpan HANYA ke cache disk (tidak ke RAM, agar hemat memori).
+    Berjalan dengan prioritas rendah dan otomatis mengalah saat sistem sibuk.
+    Kalimat yang sudah ada di disk dilewati, jadi run berikutnya sangat cepat.
+    """
+    global _precache_running
+    if _precache_running:
+        return
+    _precache_running = True
+    try:
+        try:
+            from responses import NAVIGATE_CONFIRMS
+        except ImportError:
+            return
+
+        rooms = _load_room_names()
+        if not rooms:
+            return
+
+        _lower_current_thread_priority()
+
+        todo = []
+        for room in rooms:
+            for tpl in NAVIGATE_CONFIRMS:
+                text = tpl.format(loc=room).strip()
+                key = (text.lower(), round(TTS_SPEED, 2), TTS_SPEAKER_ID)
+                if not _disk_cache_path(key).exists():
+                    todo.append((text, key))
+
+        total = len(rooms) * len(NAVIGATE_CONFIRMS)
+        if not todo:
+            logger.info(f"[TTS] Pre-cache ruangan: semua {total} kalimat sudah ada di cache")
+            return
+
+        engine = _get_tts_engine()
+        if engine is None:
+            return
+
+        logger.info(f"[TTS] Pre-cache ruangan dimulai: {len(todo)}/{total} kalimat (background)")
+        t0 = time.time()
+        done = 0
+        for text, key in todo:
+            # Mengalah selama sistem sedang dipakai interaksi
+            while _system_busy():
+                time.sleep(0.3)
+            if _disk_cache_path(key).exists():
+                continue
+            with _generate_lock:
+                audio = engine.generate(text, sid=TTS_SPEAKER_ID, speed=TTS_SPEED)
+            samples = np.array(audio.samples, dtype=np.float32)
+            _disk_cache_save(key, samples, audio.sample_rate)
+            done += 1
+            if done % 25 == 0:
+                logger.info(f"[TTS] Pre-cache ruangan: {done}/{len(todo)}")
+
+        logger.info(
+            f"[TTS] Pre-cache ruangan selesai: {done} kalimat dalam {time.time()-t0:.0f}s"
+        )
+    except Exception as e:
+        logger.warning(f"[TTS] Pre-cache ruangan gagal: {e}")
+    finally:
+        _precache_running = False
 
 
 # =========================
@@ -197,22 +408,36 @@ def synthesize(text: str, speed: float = TTS_SPEED) -> Optional[Tuple[np.ndarray
             logger.debug(f"[TTS Cache HIT] \"{clean_text[:40]}\" (0ms)")
             return samples.copy(), sample_rate
 
+    # Cek cache disk (persisten antar restart)
+    loaded = _disk_cache_load(cache_key)
+    if loaded is not None:
+        _memory_cache_put(cache_key, *loaded)
+        logger.debug(f"[TTS Disk Cache HIT] \"{clean_text[:40]}\"")
+        return loaded[0].copy(), loaded[1]
+
     # Generate baru jika belum di cache
     engine = _get_tts_engine()
     if engine is None:
         return None
 
-    t0 = time.time()
-    audio = engine.generate(clean_text, sid=TTS_SPEAKER_ID, speed=speed)
-    elapsed = time.time() - t0
+    global _foreground_requests
+    with _foreground_lock:
+        _foreground_requests += 1
+    try:
+        t0 = time.time()
+        with _generate_lock:
+            audio = engine.generate(clean_text, sid=TTS_SPEAKER_ID, speed=speed)
+        elapsed = time.time() - t0
+    finally:
+        with _foreground_lock:
+            _foreground_requests -= 1
 
     samples = np.array(audio.samples, dtype=np.float32)
     sample_rate = audio.sample_rate
 
-    # Simpan ke cache jika cache belum terlalu besar (maks 100 kalimat)
-    with _cache_lock:
-        if len(_audio_cache) < 100:
-            _audio_cache[cache_key] = (samples, sample_rate)
+    # Simpan ke cache RAM (terbatas) dan disk (persisten)
+    _memory_cache_put(cache_key, samples, sample_rate)
+    _disk_cache_save(cache_key, samples, sample_rate)
 
     logger.info(
         f"[TTS] Synthesized \"{clean_text[:45]}...\" → "
@@ -334,3 +559,15 @@ def speak_and_wait(text: str, speed: float = TTS_SPEED) -> bool:
 def is_tts_available() -> bool:
     """Cek apakah TTS engine tersedia dan model terdownload."""
     return _get_tts_engine() is not None
+
+
+if __name__ == "__main__":
+    # Jalankan manual: python tts.py --precache   (isi cache disk untuk semua kalimat)
+    #                  python tts.py --clear-cache
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if "--clear-cache" in sys.argv:
+        clear_cache()
+        print("Cache TTS dihapus.")
+    if "--precache" in sys.argv:
+        warmup()
+        precache_room_phrases()

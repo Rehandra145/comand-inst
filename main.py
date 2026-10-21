@@ -38,6 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from config import DEFAULT_MIC_DEVICE
+import responses
 
 try:
     from scheduler import scheduler, set_thread_high_priority
@@ -356,7 +357,7 @@ def get_confirmation_message(result: dict) -> tuple:
     if vstatus == "VALID":
         if intent == "NAVIGATE":
             loc = slots.get('location', '?')
-            return f"$ robot: menuju {loc}", f"Baik, saya akan menuju {loc}."
+            return f"$ robot: menuju {loc}", responses.navigate_confirm(loc)
         elif intent == "MOVE":
             direction = slots.get("direction", "?")
             distance = slots.get("distance", "")
@@ -380,6 +381,9 @@ def get_confirmation_message(result: dict) -> tuple:
     elif vstatus == "INVALID_LOCATION":
         loc = slots.get('location', '?')
         return f'$ robot: lokasi "{loc}" tidak ditemukan', f"Maaf, lokasi {loc} tidak terdaftar di sistem."
+    elif vstatus == "UNKNOWN_INTENT":
+        msg = responses.unknown_intent()
+        return f"$ robot: {msg.lower()}", msg
     else:
         return "$ robot: stand by", "Perintah diproses."
 
@@ -398,7 +402,17 @@ def listen_microphone_cli(duration: int = 5, device: int = None, prompt: str = "
     import sounddevice as sd
     import numpy as np
     import threading
-    from stt import recognizer, create_stream
+    import stt as _stt
+
+    if not _stt.is_ready():
+        sys.stdout.write("   [STT] Menyiapkan model STT, mohon tunggu...")
+        sys.stdout.flush()
+        _t0 = time.time()
+        _stt.get_recognizer()
+        sys.stdout.write(f"\r   [STT] Model siap ({time.time() - _t0:.1f}s).            \n")
+        sys.stdout.flush()
+    recognizer = _stt.get_recognizer()
+    create_stream = _stt.create_stream
 
     capture_rate = get_supported_sample_rate(device)
     channels = get_optimal_channels(device, capture_rate)
@@ -525,9 +539,12 @@ def run_task_cli(duration: int = 5, device: int = None):
     - Audio caching: kalimat umum di-sintesis dengan 0 ms latency
     - Task pinning & scheduling priority diterapkan otomatis
     """
+    from stt import preload_async as stt_preload_async
     from nlu.pipeline import NLUPipeline
     from tts import speak_and_wait, is_tts_available, warmup_async
 
+    # Load model STT di background selagi greeting TTS diputar
+    stt_preload_async()
     warmup_async()
     pipeline = NLUPipeline()
     tts_ok = is_tts_available()
@@ -546,7 +563,7 @@ def run_task_cli(duration: int = 5, device: int = None):
 
     try:
         # === STEP 1: Greeting TTS ===
-        greeting = "Halo, ada yang bisa saya bantu hari ini?"
+        greeting = responses.greeting()
         print(f"\n{MAGENTA}[🤖 ROBOT]{RESET} \"{greeting}\"")
         if tts_ok:
             speak_and_wait(greeting)
@@ -575,7 +592,7 @@ def run_task_cli(duration: int = 5, device: int = None):
         if result["status"] == "INCOMPLETE" and result.get("missing_slots"):
             missing = result["missing_slots"]
             if "location" in missing:
-                clarify_question = "Ke ruangan berapa?"
+                clarify_question = responses.ask_location()
             elif "direction" in missing:
                 clarify_question = "Ke arah mana?"
             elif "person" in missing:
@@ -615,9 +632,12 @@ def run_task_cli(duration: int = 5, device: int = None):
 
 def run_cli_interactive(duration: int = 5, device: int = None):
     """Menu CLI interaktif untuk terminal headless / Ubuntu Server."""
+    from stt import preload_async as stt_preload_async
     from nlu.pipeline import NLUPipeline
     from tts import warmup_async
 
+    # Load model STT di background selagi menu ditampilkan (agar siap saat mode dipilih)
+    stt_preload_async()
     # Prewarm audio cache & engine di background
     warmup_async()
     pipeline = NLUPipeline()
@@ -702,7 +722,10 @@ def run_gui_mode(duration: int = 5, device: int = None):
     import threading
     import queue as _queue
 
-    from stt import recognizer, create_stream
+    # `recognizer` adalah proxy lazy: import instan, model dimuat di background
+    from stt import recognizer, create_stream, preload_async as stt_preload_async
+    from stt import is_ready as stt_is_ready
+    stt_preload_async()
     from nlu.pipeline import NLUPipeline
 
     # Audio Config
@@ -782,6 +805,11 @@ def run_gui_mode(duration: int = 5, device: int = None):
         - TTS selesai dulu → baru STT mulai merekam
         - STT selesai dulu → baru proses NLU
         """
+        if not stt_is_ready():
+            ui_call(lambda: status_label.config(text="> status: menyiapkan model STT...", fg=YELLOW))
+            ui_call(lambda: stt_label.config(text="$ stt: (menyiapkan model...)", fg=YELLOW))
+            create_stream()
+            ui_call(lambda: stt_label.config(text="$ stt: (mendengarkan...)", fg=CYAN))
         stream = create_stream()
         audio_q = _queue.Queue()
         local_stop = threading.Event()
@@ -922,7 +950,7 @@ def run_gui_mode(duration: int = 5, device: int = None):
 
         try:
             # === STEP 1: Greeting TTS ===
-            greeting = "Halo, ada yang bisa saya bantu hari ini?"
+            greeting = responses.greeting()
             ui_call(lambda: status_label.config(text="> status: robot berbicara...", fg=ORANGE))
             update_conv_log("🤖 Robot", greeting, ORANGE)
             ui_call(lambda: stt_label.config(text="$ stt: (menunggu giliran bicara...)", fg=FG_DIM))
@@ -982,7 +1010,7 @@ def run_gui_mode(duration: int = 5, device: int = None):
 
                 # Tentukan pertanyaan klarifikasi berdasarkan slot yang kurang
                 if "location" in missing:
-                    clarify_question = "Ke ruangan berapa?"
+                    clarify_question = responses.ask_location()
                 elif "direction" in missing:
                     clarify_question = "Ke arah mana?"
                 elif "person" in missing:
@@ -1081,7 +1109,7 @@ def run_gui_mode(duration: int = 5, device: int = None):
             if intent == "NAVIGATE":
                 loc = slots.get('location', '?')
                 rtext = f"$ robot: menuju {loc}"
-                confirm_msg = f"Baik, saya akan menuju {loc}."
+                confirm_msg = responses.navigate_confirm(loc)
             elif intent == "MOVE":
                 direction = slots.get("direction", "?")
                 distance = slots.get("distance", "")
@@ -1115,6 +1143,10 @@ def run_gui_mode(duration: int = 5, device: int = None):
             loc = result['slots'].get('location', '?')
             rtext = f'$ robot: lokasi "{loc}" tidak ditemukan'
             confirm_msg = f"Maaf, lokasi {loc} tidak ditemukan."
+        elif vstatus == "UNKNOWN_INTENT":
+            rcolor = RED
+            confirm_msg = responses.unknown_intent()
+            rtext = f"$ robot: {confirm_msg.lower()}"
         else:
             rcolor = RED
             rtext = "$ robot: perintah tidak dikenali"
@@ -1189,6 +1221,9 @@ def run_gui_mode(duration: int = 5, device: int = None):
         nonlocal is_recording
 
         stop_event.clear()
+        if not stt_is_ready():
+            ui_call(lambda: status_label.config(text="> status: menyiapkan model STT...", fg=YELLOW))
+            ui_call(lambda: stt_label.config(text="$ stt: (menyiapkan model...)", fg=YELLOW))
         stream = create_stream()
         audio_q = _queue.Queue()
 
@@ -1330,6 +1365,9 @@ def run_gui_mode(duration: int = 5, device: int = None):
             elif vstatus == "INVALID_LOCATION":
                 rcolor = RED
                 rtext = f"$ robot: lokasi \"{result['slots'].get('location', '?')}\" tidak ditemukan"
+            elif vstatus == "UNKNOWN_INTENT":
+                rcolor = RED
+                rtext = f"$ robot: {responses.unknown_intent().lower()}"
             else:
                 rcolor = RED
                 rtext = "$ robot: perintah tidak dikenali"
@@ -1678,6 +1716,8 @@ if __name__ == "__main__":
 
     # 4. Direct terminal mic mode
     if args.mic:
+        from stt import preload_async as stt_preload_async
+        stt_preload_async()
         from nlu.pipeline import NLUPipeline
         pipeline = NLUPipeline()
         record_and_process_cli(pipeline, duration=args.duration, device=args.device)

@@ -11,3 +11,11 @@ wheels/
 
 # Temporary audio test files
 *.wav
+
+# TTS audio cache
+.tts_cache/
+
+# Optimized / quantized ONNX model caches
+model/*.opt.onnx
+model/*.int8.onnx
+model/*.tmp.onnx

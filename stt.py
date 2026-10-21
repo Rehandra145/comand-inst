@@ -1,7 +1,10 @@
 import logging
+import os
+import threading
+import time
 import wave
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 import numpy as np
 import sherpa_onnx
 
@@ -26,27 +29,141 @@ _joiner = _pick("joiner.onnx", "joiner.int8.onnx")
 _decoder = str(Path(MODEL) / "decoder.onnx")
 _tokens = str(Path(MODEL) / "tokens.txt")
 
-# Load model SEKALI saat program mulai
-recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
-    tokens=_tokens,
-    encoder=_encoder,
-    decoder=_decoder,
-    joiner=_joiner,
-    num_threads=NUM_THREADS,
-    sample_rate=STT_RATE,
-    feature_dim=80,
-    decoding_method="greedy_search",
-    provider="cpu",
-    enable_endpoint_detection=True,
-    rule1_min_trailing_silence=2.4,
-    rule2_min_trailing_silence=1.2,
-    rule3_min_utterance_length=20.0,
-)
+
+# =========================
+# PRE-OPTIMIZED ENCODER CACHE
+# =========================
+# Encoder zipformer berisi >10.000 node ONNX. Sebagian besar waktu load habis untuk
+# parsing + optimasi graph oleh onnxruntime setiap kali program start.
+# Graph yang sudah dioptimasi (level BASIC: constant folding, eliminasi node redundan —
+# hasil inferensi identik) disimpan sekali ke "<encoder>.opt.onnx" lalu dipakai ulang,
+# sehingga load berikutnya jauh lebih cepat.
+
+def _optimized_path(src: Path) -> Path:
+    return src.with_name(src.stem + ".opt.onnx")
+
+
+def _ensure_optimized_encoder(src: Path) -> Optional[Path]:
+    """Kembalikan path encoder teroptimasi (buat jika belum ada / kadaluarsa)."""
+    opt = _optimized_path(src)
+    try:
+        if opt.exists() and opt.stat().st_mtime >= src.stat().st_mtime:
+            return opt
+    except OSError:
+        return None
+
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return None
+
+    tmp = opt.with_name(opt.stem + ".tmp.onnx")
+    try:
+        t0 = time.time()
+        logger.info(f"[STT] Membuat cache encoder teroptimasi (sekali saja): {opt.name} ...")
+        so = ort.SessionOptions()
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+        so.optimized_model_filepath = str(tmp)
+        ort.InferenceSession(str(src), so, providers=["CPUExecutionProvider"])
+        os.replace(tmp, opt)
+        logger.info(f"[STT] Cache encoder siap dalam {time.time() - t0:.1f}s")
+        return opt
+    except Exception as e:
+        logger.warning(f"[STT] Gagal membuat encoder teroptimasi, pakai model asli: {e}")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _build_recognizer(encoder: str):
+    return sherpa_onnx.OnlineRecognizer.from_transducer(
+        tokens=_tokens,
+        encoder=encoder,
+        decoder=_decoder,
+        joiner=_joiner,
+        num_threads=NUM_THREADS,
+        sample_rate=STT_RATE,
+        feature_dim=80,
+        decoding_method="greedy_search",
+        provider="cpu",
+        enable_endpoint_detection=True,
+        rule1_min_trailing_silence=2.4,
+        rule2_min_trailing_silence=1.2,
+        rule3_min_utterance_length=20.0,
+    )
+
+
+# =========================
+# LAZY + BACKGROUND LOADING
+# =========================
+# Model TIDAK lagi di-load saat `import stt` (dulu memblokir ~14 detik).
+# Panggil preload_async() sedini mungkin (saat menu tampil / greeting TTS diputar),
+# sehingga ketika mode STT dipilih, model biasanya sudah siap.
+
+_recognizer = None
+_load_lock = threading.Lock()
+_preload_started = False
+
+
+def get_recognizer():
+    """Ambil recognizer; load sekarang (blocking) jika belum siap."""
+    global _recognizer
+    if _recognizer is not None:
+        return _recognizer
+    with _load_lock:
+        if _recognizer is None:
+            t0 = time.time()
+            src = Path(_encoder)
+            opt = _ensure_optimized_encoder(src)
+            rec = None
+            if opt is not None:
+                try:
+                    rec = _build_recognizer(str(opt))
+                except Exception as e:
+                    logger.warning(f"[STT] Encoder teroptimasi gagal dimuat ({e}), pakai model asli")
+            if rec is None:
+                rec = _build_recognizer(str(src))
+            _recognizer = rec
+            logger.info(f"[STT] Model siap dalam {time.time() - t0:.1f}s")
+    return _recognizer
+
+
+def is_ready() -> bool:
+    """True jika model STT sudah selesai dimuat."""
+    return _recognizer is not None
+
+
+def preload_async():
+    """Mulai load model STT di background thread (aman dipanggil berkali-kali)."""
+    global _preload_started
+    if _recognizer is not None or _preload_started:
+        return
+    _preload_started = True
+
+    def _run():
+        try:
+            get_recognizer()
+        except Exception as e:
+            logger.error(f"[STT] Preload model gagal: {e}")
+
+    threading.Thread(target=_run, name="STT-Preload", daemon=True).start()
+
+
+class _LazyRecognizer:
+    """Proxy agar `from stt import recognizer` tetap bekerja tanpa memblokir saat import."""
+
+    def __getattr__(self, name):
+        return getattr(get_recognizer(), name)
+
+
+recognizer = _LazyRecognizer()
 
 
 def create_stream():
     """Membuat stream baru untuk real-time streaming audio."""
-    return recognizer.create_stream()
+    return get_recognizer().create_stream()
 
 
 def speech_to_text_samples(samples: np.ndarray, sample_rate: int = STT_RATE) -> str:
@@ -55,13 +172,14 @@ def speech_to_text_samples(samples: np.ndarray, sample_rate: int = STT_RATE) -> 
         samples = samples.squeeze()
     samples = np.ascontiguousarray(samples, dtype=np.float32)
 
-    stream = recognizer.create_stream()
+    rec = get_recognizer()
+    stream = rec.create_stream()
     stream.accept_waveform(sample_rate, samples)
 
-    while recognizer.is_ready(stream):
-        recognizer.decode_stream(stream)
+    while rec.is_ready(stream):
+        rec.decode_stream(stream)
 
-    return recognizer.get_result(stream).strip()
+    return rec.get_result(stream).strip()
 
 
 def speech_to_text(audio_file: Union[str, Path]) -> str:
