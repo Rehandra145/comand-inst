@@ -110,48 +110,50 @@ def resample_to_16k(samples, orig_sr: int):
 
 
 def list_audio_devices():
-    """Tampilkan daftar perangkat input audio (microphone) yang tersedia."""
+    """Tampilkan daftar perangkat input audio (microphone) yang tersedia dalam kartu styling."""
     try:
         import sounddevice as sd
         devices = sd.query_devices()
-        print("\n=== DAFTAR PERANGKAT INPUT AUDIO ===")
+        print(f"\n\033[1;36m╭─── 🎧 DAFTAR PERANGKAT INPUT AUDIO (MIKROFON) ─────────────────────╮\033[0m")
         found = False
         default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else -1
         effective_in = get_effective_input_device()
         for i, dev in enumerate(devices):
             if dev.get("max_input_channels", 0) > 0:
                 found = True
-                marker = "*" if i == effective_in else " "
+                is_active = (i == effective_in)
+                marker = "\033[1;32m● AKTIF\033[0m" if is_active else "\033[38;5;244m○      \033[0m"
                 native_sr = get_supported_sample_rate(i)
-                print(f" [{marker}] Device ID {i:2d}: {dev['name']} (Channels: {dev['max_input_channels']}, Rate: {native_sr} Hz)")
+                ch = dev.get("max_input_channels", 1)
+                print(f"  [{marker}] \033[1mID {i:2d}\033[0m: \033[1;37m{dev['name']}\033[0m \033[38;5;244m({ch} Ch, {native_sr} Hz)\033[0m")
         if not found:
-            print("  (Tidak ada perangkat microphone yang terdeteksi)")
+            print("  \033[1;31m(Tidak ada perangkat mikrofon yang terdeteksi)\033[0m")
         else:
-            print(f"\n  Keterangan: [*] = Perangkat input aktif yang akan digunakan (ID: {effective_in}).")
-            print("  Gunakan flag --device <ID> untuk memilih mikrofon tertentu.\n")
+            print(f"\n  \033[38;5;244mKeterangan: [\033[1;32m● AKTIF\033[38;5;244m] = Perangkat aktif yang digunakan (ID: {effective_in}).\033[0m")
+            print(f"  \033[38;5;244mGunakan flag --device <ID> untuk menentukan ID mikrofon tertentu.\033[0m")
+        print(f"\033[1;36m╰────────────────────────────────────────────────────────────────────╯\033[0m\n")
     except Exception as e:
         print(f"Gagal mendeteksi perangkat audio: {e}\n")
 
 
 def test_mic_hardware(device: Optional[int] = None, duration: int = 3):
-    """Diagnosa dan uji coba mikrofon, periksa level sinyal audio & volume."""
+    """Diagnosa dan uji coba mikrofon dengan visual VU-meter dan analisis sensitivitas."""
     device = get_effective_input_device(device)
-    print("\n" + "=" * 60)
-    print("  [DIAGNOSA] Driver Audio & Perangkat Mikrofon")
-    print("=" * 60)
+    print(f"\n\033[1;36m╭─── ⚡ DIAGNOSA PERANGKAT & LEVEL AUDIO MIKROFON ────────────────────╮\033[0m")
     try:
         import sounddevice as sd
     except ImportError as e:
-        print(f"[ERROR] Library belum lengkap: {e}")
-        print("   Jalankan: sudo apt install -y portaudio19-dev libasound2-dev")
-        print("   Lalu: uv pip install sounddevice numpy\n")
+        print(f"  \033[1;31m[ERROR] Library sounddevice belum terinstal: {e}\033[0m")
+        print("  Jalankan: uv pip install sounddevice numpy\n")
+        print(f"\033[1;36m╰────────────────────────────────────────────────────────────────────╯\033[0m\n")
         return
 
     try:
         dev_info = sd.query_devices(device, "input")
     except Exception as e:
-        print(f"[ERROR] Gagal mengakses perangkat audio input (ID: {device}): {e}")
-        print("   Gunakan flag --list-devices untuk melihat ID perangkat yang tersedia.\n")
+        print(f"  \033[1;31m[ERROR] Gagal mengakses perangkat audio input (ID: {device}): {e}\033[0m")
+        print("  Gunakan flag --list-devices untuk melihat ID yang tersedia.\n")
+        print(f"\033[1;36m╰────────────────────────────────────────────────────────────────────╯\033[0m\n")
         return
 
     dev_name = dev_info.get("name", "Unknown")
@@ -159,12 +161,14 @@ def test_mic_hardware(device: Optional[int] = None, duration: int = 3):
     capture_sr = get_supported_sample_rate(device)
     optimal_channels = get_optimal_channels(device, capture_sr)
 
-    print(f"\n1. Perangkat Terpilih : [{device if device is not None else 'Default'}] {dev_name}")
-    print(f"   Jumlah Channel     : {channels} (Menggunakan: {optimal_channels} channel)")
-    print(f"   Hardware Sample Rate: {capture_sr} Hz {'(akan di-resample otomatis ke 16000 Hz untuk STT)' if capture_sr != 16000 else ''}")
+    print(f"  \033[1m1. Informasi Hardware:\033[0m")
+    print(f"     - Perangkat Terpilih   : \033[1;32m[{device if device is not None else 'Default'}] {dev_name}\033[0m")
+    print(f"     - Channel Hardware     : {channels} Ch (Menggunakan: {optimal_channels} Ch Optimal)")
+    sr_note = "(\033[38;5;244mauto-resample 16000 Hz\033[0m)" if capture_sr != 16000 else "(\033[1;32mNative STT\033[0m)"
+    print(f"     - Hardware Sample Rate : {capture_sr} Hz {sr_note}")
 
-    print(f"\n2. Merekam suara sampel selama {duration} detik...")
-    print("   >> SILAKAN BERBICARA ATAU BUAT SUARA SEKARANG...")
+    print(f"\n  \033[1m2. Merekam sampel audio ({duration} detik)...\033[0m")
+    print("     \033[1;33m>> SILAKAN BERBICARA ATAU BUAT SUARA SEKARANG...\033[0m")
 
     try:
         recording = sd.rec(
@@ -176,10 +180,8 @@ def test_mic_hardware(device: Optional[int] = None, duration: int = 3):
         )
         sd.wait()
     except Exception as e:
-        print(f"\n[ERROR] Gagal merekam audio dari driver: {e}")
-        print("   Tips Ubuntu Server:")
-        print("   1. Pastikan user masuk ke grup audio: 'sudo usermod -aG audio $USER'")
-        print("   2. Cek apakah ALSA mengenali mic USB: 'arecord -l'\n")
+        print(f"\n  \033[1;31m[ERROR] Gagal merekam audio dari driver: {e}\033[0m")
+        print(f"\033[1;36m╰────────────────────────────────────────────────────────────────────╯\033[0m\n")
         return
 
     # Hitung RMS & Peak Amplitude
@@ -187,28 +189,31 @@ def test_mic_hardware(device: Optional[int] = None, duration: int = 3):
     rms = float(np.sqrt(np.mean(samples_flat ** 2)))
     peak = float(np.max(np.abs(samples_flat)))
 
-    print(f"\n3. Hasil Pengukuran Level Sinyal Audio:")
-    print(f"   - Root Mean Square (RMS) Level : {rms:.5f}")
-    print(f"   - Peak Amplitude (0.0 s/d 1.0) : {peak:.5f}")
+    # Visual VU-Meter bar (24 blocks)
+    vu_blocks = int(min(1.0, peak * 2.5) * 24)
+    vu_bar = "█" * vu_blocks + "░" * (24 - vu_blocks)
+    db_level = 20 * np.log10(peak) if peak > 1e-5 else -99.9
+
+    print(f"\n  \033[1m3. Hasil Pengukuran Level Sinyal Audio:\033[0m")
+    print(f"     - Level VU Meter  : [\033[1;32m{vu_bar[:16]}\033[1;33m{vu_bar[16:21]}\033[1;31m{vu_bar[21:]}\033[0m] {db_level:.1f} dBFS")
+    print(f"     - RMS Sinyal      : {rms:.5f}")
+    print(f"     - Peak Amplitude  : {peak:.5f} / 1.000")
 
     if peak < 0.01:
-        print("\n[PERINGATAN] Sinyal suara SANGAT LEMAH atau HENING (MUTE)!")
-        print("   Driver hardware terdeteksi, tetapi mikrofon tidak menangkap suara.")
-        print("   Penyebab & Solusi Umum di Ubuntu Server:")
-        print("   - Volume Capture ALSA di-mute atau bernilai 0%.")
-        print("   - Jalankan 'alsamixer' di terminal -> Tekan F6 (pilih USB Mic) -> Tekan F4 (Capture) -> Naikkan volume tombol Panah Atas.")
+        print("\n  \033[1;31m[PERINGATAN] Sinyal suara SANGAT LEMAH atau HENING (MUTE)!\033[0m")
+        print("  Driver hardware terdeteksi, tetapi mikrofon tidak menangkap suara.")
+        print("  Tips: Periksa slider volume microphone di pengaturan audio / alsamixer.")
     elif peak < 0.05:
-        print("\n[CATATAN] Sinyal suara terdeteksi tetapi volumenya agak pelan.")
-        print("   Disarankan menaikkan gain mikrofon lewat 'alsamixer'.")
+        print("\n  \033[1;33m[CATATAN] Sinyal suara terdeteksi namun agak pelan.\033[0m")
+        print("  Disarankan sedikit menaikkan gain/volume mikrofon.")
     else:
-        print("\n[BERHASIL] Driver & Mikrofon berfungsi NORMAL! Sinyal audio masuk dengan jelas.")
+        print("\n  \033[1;32m✓ [BERHASIL] Driver & Mikrofon berfungsi NORMAL! Sinyal audio masuk dengan jelas.\033[0m")
 
-    # Simpan sampel ke file test_mic.wav
     try:
         import soundfile as sf
         sf.write("test_mic.wav", recording, capture_sr)
-        print("   (File rekaman sampel berhasil disimpan ke 'test_mic.wav' untuk verifikasi)")
+        print("  \033[38;5;244m(Sampel rekaman disimpan ke 'test_mic.wav' untuk verifikasi)\033[0m")
     except Exception:
         pass
 
-    print("=" * 60 + "\n")
+    print(f"\033[1;36m╰────────────────────────────────────────────────────────────────────╯\033[0m\n")

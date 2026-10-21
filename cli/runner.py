@@ -6,6 +6,7 @@ import json
 import logging
 import queue
 import sys
+import textwrap
 import threading
 import time
 from typing import Optional
@@ -26,11 +27,22 @@ from nlu.dialog import (
     get_confirmation_message,
 )
 
-# Pastikan output terminal aman di Windows (UTF-8 fallback replace)
+# Pastikan output terminal aman di Windows (UTF-8 & ANSI VT100 processing)
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+if sys.platform == "win32":
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        hStdOut = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_ulong()
+        kernel32.GetConsoleMode(hStdOut, ctypes.byref(mode))
+        kernel32.SetConsoleMode(hStdOut, mode.value | 0x0004)
     except Exception:
         pass
 
@@ -41,6 +53,70 @@ except ImportError:
     set_thread_high_priority = lambda: None
 
 logger = logging.getLogger(__name__)
+
+# =========================
+# CLI DESIGN TOKENS
+# =========================
+CLR_CYAN = "\033[1;36m"
+CLR_BLUE = "\033[1;34m"
+CLR_GREEN = "\033[1;32m"
+CLR_YELLOW = "\033[1;33m"
+CLR_MAGENTA = "\033[1;35m"
+CLR_RED = "\033[1;31m"
+CLR_WHITE = "\033[1;37m"
+CLR_MUTED = "\033[38;5;244m"
+CLR_DIM = "\033[2m"
+CLR_BOLD = "\033[1m"
+CLR_RESET = "\033[0m"
+
+
+def print_banner(ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):
+    """Cetak banner modern identitas robot di terminal."""
+    target = f"{ros2_host or '10.107.245.221'}:{ros2_port or 5000}"
+    print(f"""
+{CLR_CYAN}╭──────────────────────────────────────────────────────────────────────╮
+│   {CLR_WHITE}🤖  R O B O T   V O I C E   A S S I S T A N T{CLR_CYAN}                      │
+│   {CLR_MUTED}Hospital Autonomous Guidance & Medicine Delivery System{CLR_CYAN}            │
+│  ──────────────────────────────────────────────────────────────────  │
+│   {CLR_GREEN}● STATUS : ONLINE{CLR_CYAN}           {CLR_WHITE}● CORE : Zipformer RNN-T (INT8){CLR_CYAN}       │
+│   {CLR_YELLOW}● TTS    : Piper VITS{CLR_CYAN}       {CLR_WHITE}● ROS2 : {target:<20}{CLR_CYAN} │
+╰──────────────────────────────────────────────────────────────────────╯{CLR_RESET}""")
+
+
+def print_menu_card():
+    """Cetak kartu menu navigasi opsi operasi terminal."""
+    print(f"""{CLR_CYAN}╭─── 🧭 PILIH MODE OPERASI ────────────────────────────────────────────╮
+│                                                                      │
+│   {CLR_YELLOW}[1]{CLR_RESET}  {CLR_WHITE}💬  Mode Tugas Dialog Interaktif{CLR_RESET} {CLR_MUTED}(TTS ↔ STT Sequential){CLR_CYAN}       │
+│        {CLR_MUTED}Alur percakapan 2-arah terpandu dengan suara robot{CLR_CYAN}            │
+│                                                                      │
+│   {CLR_YELLOW}[2]{CLR_RESET}  {CLR_WHITE}🎙️   Bicara Langsung via Mikrofon{CLR_RESET} {CLR_MUTED}(Continuous Streaming){CLR_CYAN}      │
+│        {CLR_MUTED}Streaming audio real-time & eksekusi NLU instan{CLR_CYAN}               │
+│                                                                      │
+│   {CLR_YELLOW}[3]{CLR_RESET}  {CLR_WHITE}⌨️   Ketik Perintah Teks Manual{CLR_RESET} {CLR_MUTED}(Pengujian Cepat){CLR_CYAN}             │
+│        {CLR_MUTED}Uji intent & slot extraction tanpa mikrofon{CLR_CYAN}                    │
+│                                                                      │
+│   {CLR_YELLOW}[4]{CLR_RESET}  {CLR_WHITE}🎧  Daftar Perangkat Input Audio{CLR_RESET} {CLR_MUTED}(Hardware Info){CLR_CYAN}           │
+│        {CLR_MUTED}Lihat seluruh mikrofon yang terdeteksi di sistem{CLR_CYAN}              │
+│                                                                      │
+│   {CLR_YELLOW}[5]{CLR_RESET}  {CLR_WHITE}⚡  Tes Diagnosa & Volume Mikrofon{CLR_RESET} {CLR_MUTED}(Mic Check){CLR_CYAN}              │
+│        {CLR_MUTED}Periksa sample rate & level sensitivitas suara{CLR_CYAN}                 │
+│                                                                      │
+│   {CLR_RED}[q]{CLR_RESET}  {CLR_WHITE}🚪  Keluar dari Aplikasi{CLR_RESET} {CLR_MUTED}(Exit){CLR_CYAN}                               │
+│                                                                      │
+╰──────────────────────────────────────────────────────────────────────╯{CLR_RESET}""")
+
+
+def print_bubble(speaker: str, text: str, color=CLR_MAGENTA, icon="🤖", subtitle: Optional[str] = None):
+    """Cetak bubble percakapan dialog dengan border rounded yang rapi."""
+    print(f"\n{color}╭─ {icon} {CLR_WHITE}{speaker}{CLR_RESET}{color} " + "─" * 48)
+    formatted = f'"{text.strip()}"'
+    for line in textwrap.wrap(formatted, width=64) or [formatted]:
+        print(f"{color}│{CLR_RESET}  {CLR_BOLD}{line}{CLR_RESET}")
+    if subtitle:
+        for sub in textwrap.wrap(subtitle, width=64) or [subtitle]:
+            print(f"{color}│{CLR_RESET}  {CLR_YELLOW}● {sub}{CLR_RESET}")
+    print(f"{color}╰" + "─" * 58 + f"{CLR_RESET}")
 
 
 def wait_models_ready(verbose: bool = True):
@@ -55,12 +131,10 @@ def wait_models_ready(verbose: bool = True):
         return
 
     if verbose:
-        print("\n" + "-" * 60)
-        print("  [*] Menyiapkan & memuat seluruh engine (warming up)...")
-        print("  Mohon tunggu sebentar sampai semua model siap.")
-        print("-" * 60)
+        print(f"\n{CLR_CYAN}╭─── ⏳ INISIALISASI & WARMUP MODEL ────────────────────────────────────╮")
+        print(f"│  {CLR_MUTED}Memuat model kecerdasan buatan ke memori (0ms run latency)...{CLR_CYAN}        │")
+        print(f"│                                                                      │{CLR_RESET}")
 
-    # Redam logger sementara agar tampilan CLI rapi
     stt_logger = logging.getLogger("audio.stt")
     tts_logger = logging.getLogger("audio.tts")
     prev_stt_level = stt_logger.level
@@ -73,34 +147,35 @@ def wait_models_ready(verbose: bool = True):
         # 1. Load Model STT
         if not is_ready():
             if verbose:
-                sys.stdout.write("  [1/2] Engine STT (Zipformer RNN-T Streaming) : Memuat model... ")
+                sys.stdout.write(f"{CLR_CYAN}│{CLR_RESET}  [1/2] Engine STT (Zipformer RNN-T Streaming) : Memuat... ")
                 sys.stdout.flush()
             t0 = time.time()
             get_recognizer()
             if verbose:
-                sys.stdout.write(f"\033[1;32m[SIAP]\033[0m ({time.time() - t0:.1f}s)\n")
+                sys.stdout.write(f"{CLR_GREEN}[SIAP]{CLR_RESET} ({time.time() - t0:.1f}s)\n")
                 sys.stdout.flush()
 
         # 2. Warmup Engine TTS & Cache
         if verbose:
-            sys.stdout.write("  [2/2] Engine TTS (Piper VITS Offline & Cache): Melakukan warmup... ")
+            sys.stdout.write(f"{CLR_CYAN}│{CLR_RESET}  [2/2] Engine TTS (Piper VITS Offline & Cache): Melakukan warmup... ")
             sys.stdout.flush()
         t0 = time.time()
         warmup()
         if verbose:
-            sys.stdout.write(f"\033[1;32m[SIAP]\033[0m ({time.time() - t0:.1f}s)\n")
+            sys.stdout.write(f"{CLR_GREEN}[SIAP]{CLR_RESET} ({time.time() - t0:.1f}s)\n")
             sys.stdout.flush()
 
         if verbose:
-            print("  \033[1;32m[+] Semua model siap! Sistem siap menerima perintah.\033[0m")
-            print("-" * 60 + "\n")
+            print(f"{CLR_CYAN}│                                                                      │")
+            print(f"│  {CLR_GREEN}✓ Seluruh model siap! Sistem siap menerima perintah.{CLR_CYAN}               │")
+            print(f"╰──────────────────────────────────────────────────────────────────────╯{CLR_RESET}\n")
     finally:
         stt_logger.setLevel(prev_stt_level)
         tts_logger.setLevel(prev_tts_level)
 
 
 def print_result_box(text: str, result: dict):
-    """Cetak hasil transkripsi dan NLU dalam format terminal yang rapi."""
+    """Cetak hasil transkripsi dan NLU dalam format terminal card yang modern."""
     status = result.get("status", "UNKNOWN")
     intent = result.get("intent", "UNKNOWN")
     conf = result.get("confidence", 0.0)
@@ -113,46 +188,49 @@ def print_result_box(text: str, result: dict):
         } if status == "VALID" else {}
     )
 
-    # ANSI Styling
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    RED = "\033[31m"
-    CYAN = "\033[36m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RESET = "\033[0m"
-
     if status == "VALID":
-        status_colored = f"{GREEN}{status}{RESET}"
+        status_badge = f"{CLR_GREEN}● VALID{CLR_RESET}"
+        border_col = CLR_GREEN
     elif status == "INVALID_LOCATION":
-        status_colored = f"{RED}{status}{RESET}"
+        status_badge = f"{CLR_RED}✕ INVALID LOCATION{CLR_RESET}"
+        border_col = CLR_RED
+    elif status == "INCOMPLETE":
+        status_badge = f"{CLR_YELLOW}▲ INCOMPLETE (Slot Kurang){CLR_RESET}"
+        border_col = CLR_YELLOW
     else:
-        status_colored = f"{YELLOW}{status}{RESET}"
-
-    print(f"\n{BOLD}=========================== HASIL NLU ==========================={RESET}")
-    print(f" {BOLD}Audio Transkripsi :{RESET} {CYAN}\"{text}\"{RESET}")
-    print(f" {BOLD}Intent            :{RESET} {BOLD}{intent}{RESET} (Confidence: {conf:.2f})")
-    print(f" {BOLD}Extracted Slots   :{RESET} {json.dumps(slots, ensure_ascii=False) if slots else '-'}")
-    print(f" {BOLD}Validation Status :{RESET} {status_colored}")
-    if "invalid_room" in result:
-        print(f" {BOLD}Invalid Room      :{RESET} {RED}{result['invalid_room']}{RESET}")
+        status_badge = f"{CLR_YELLOW}? {status}{CLR_RESET}"
+        border_col = CLR_CYAN
 
     ros2_sent = result.get("ros2_sent", False)
     ros2_target = result.get("ros2_target", "")
     ros2_err = result.get("ros2_error", "")
+
     if ros2_sent:
-        print(f" {BOLD}ROS 2 Status      :{RESET} {GREEN}✓ TERKIRIM{RESET} ke {ros2_target}")
+        ros2_status = f"{CLR_GREEN}✓ TERKIRIM{CLR_RESET} ke {ros2_target}"
     elif status == "VALID":
-        print(f" {BOLD}ROS 2 Status      :{RESET} {RED}✕ GAGAL KIRIM{RESET} ke {ros2_target} ({ros2_err})")
+        ros2_status = f"{CLR_RED}✕ GAGAL KIRIM{CLR_RESET} ke {ros2_target} ({ros2_err})"
     else:
-        print(f" {BOLD}ROS 2 Status      :{RESET} {YELLOW}⏸ DITAHAN{RESET} (status {status})")
+        ros2_status = f"{CLR_MUTED}⏸ DITAHAN{CLR_RESET} (status {status})"
 
-    print(f" {BOLD}ROS 2 Payload     :{RESET}")
-    print(f"{DIM}{json.dumps(payload, indent=2, ensure_ascii=False)}{RESET}")
-    print(f"{BOLD}================================================================={RESET}\n")
+    print(f"\n{border_col}╭─── 🧠 HASIL ANALISIS NLU & TELEMETRI ──────────────────────────────╮{CLR_RESET}")
+    print(f"{border_col}│{CLR_RESET}  {CLR_BOLD}Audio Transkripsi :{CLR_RESET} {CLR_CYAN}\"{text}\"{CLR_RESET}")
+    print(f"{border_col}│{CLR_RESET}  {CLR_BOLD}Intent Terdeteksi :{CLR_RESET} {CLR_BOLD}{intent}{CLR_RESET}  {CLR_MUTED}[Confidence: {conf*100:.0f}%]{CLR_RESET}")
+    slots_str = json.dumps(slots, ensure_ascii=False) if slots else "-"
+    print(f"{border_col}│{CLR_RESET}  {CLR_BOLD}Ekstraksi Slot    :{CLR_RESET} {CLR_WHITE}{slots_str}{CLR_RESET}")
+    print(f"{border_col}│{CLR_RESET}  {CLR_BOLD}Status Validasi   :{CLR_RESET} {status_badge}")
+    if "invalid_room" in result:
+        print(f"{border_col}│{CLR_RESET}  {CLR_BOLD}Ruangan Salah     :{CLR_RESET} {CLR_RED}{result['invalid_room']}{CLR_RESET}")
+    print(f"{border_col}│{CLR_RESET}  {CLR_BOLD}Koneksi ROS 2     :{CLR_RESET} {ros2_status}")
+    print(f"{border_col}│{CLR_RESET}")
+    print(f"{border_col}│{CLR_RESET}  {CLR_MUTED}── ROS 2 Structured Payload ────────────────────────────────────{CLR_RESET}")
+
+    payload_lines = json.dumps(payload, indent=2, ensure_ascii=False).split("\n")
+    for pl in payload_lines:
+        print(f"{border_col}│{CLR_RESET}    {CLR_CYAN}{pl}{CLR_RESET}")
+    print(f"{border_col}╰────────────────────────────────────────────────────────────────────╯{CLR_RESET}\n")
 
 
-def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, prompt: str = "   Live Audio Stream: ") -> str:
+def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, prompt: str = "   ● Mendengar: ") -> str:
     """
     Mendengarkan mikrofon satu kali (single-shot non-streaming / blocking) untuk CLI.
     Terintegrasi dengan scheduler (enter_stt, exit_stt, task pinning).
@@ -162,12 +240,13 @@ def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, promp
     import audio.stt as _stt
 
     if not _stt.is_ready():
-        sys.stdout.write("   [STT] Menyiapkan model STT, mohon tunggu...")
+        sys.stdout.write(f"  {CLR_CYAN}│{CLR_RESET}  [STT] Menyiapkan model STT...")
         sys.stdout.flush()
         _t0 = time.time()
         _stt.get_recognizer()
-        sys.stdout.write(f"\r   [STT] Model siap ({time.time() - _t0:.1f}s).            \n")
+        sys.stdout.write(f"\r  {CLR_CYAN}│{CLR_RESET}  [STT] Model siap ({time.time() - _t0:.1f}s).            \n")
         sys.stdout.flush()
+
     recognizer = _stt.get_recognizer()
     create_stream = _stt.create_stream
 
@@ -225,7 +304,7 @@ def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, promp
                     if partial != last_text:
                         last_text = partial
                         last_change_time = time.time()
-                    sys.stdout.write(f"\r   Live Audio Stream: \"\033[36m{partial}\033[0m...\" ")
+                    sys.stdout.write(f"\r  {CLR_CYAN}│{CLR_RESET}  ● Mendengar: \"{CLR_WHITE}{partial}{CLR_RESET}...\" ")
                     sys.stdout.flush()
 
                 if is_endpoint:
@@ -264,7 +343,7 @@ def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, promp
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f"\n[ERROR Microphone]: {e}")
+        print(f"\n  {CLR_RED}[ERROR Microphone]: {e}{CLR_RESET}")
         return ""
     finally:
         local_stop.set()
@@ -282,11 +361,13 @@ def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, promp
 def record_and_process_cli(pipeline, duration: int = 5, device: Optional[int] = None):
     """Rekam audio dari mikrofon dan proses real-time streaming di terminal."""
     wait_models_ready(verbose=True)
-    print(f"\n[LISTENING] Silakan berbicara (maks {duration} detik)... Selesai bicara otomatis diproses.")
-    text = listen_microphone_cli(duration=duration, device=device, prompt="   Live Audio Stream: ")
-    print(f"\r   Transkripsi Akhir: \"\033[32m{text}\033[0m\"                                  \n")
+    print(f"\n{CLR_CYAN}╭─ 🎙️  STREAM TALK (Maks {duration} detik) ──────────────────────────────────{CLR_RESET}")
+    print(f"{CLR_CYAN}│{CLR_RESET}  Silakan berbicara... (Berhenti bicara otomatis diproses)")
+    text = listen_microphone_cli(duration=duration, device=device, prompt=f"{CLR_CYAN}│{CLR_RESET}  ● Mendengar: ")
+    print(f"{CLR_CYAN}╰─────────────────────────────────────────────────────────────────────{CLR_RESET}")
+
     if not text:
-        print("[WARN] Tidak ada ucapan/suara yang terdeteksi.")
+        print(f"  {CLR_YELLOW}[WARN] Tidak ada ucapan/suara yang terdeteksi.{CLR_RESET}\n")
         return
 
     result = pipeline.process(text)
@@ -303,17 +384,7 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
     - Audio caching: kalimat umum di-sintesis dengan 0 ms latency
     - Task pinning & scheduling priority diterapkan otomatis
     """
-    CYAN = "\033[1;36m"
-    GREEN = "\033[1;32m"
-    YELLOW = "\033[1;33m"
-    MAGENTA = "\033[1;35m"
-    RED = "\033[1;31m"
-    RESET = "\033[0m"
-
-    print("\n" + "=" * 64)
-    print("  MODE TUGAS DIALOG INTERAKTIF (SEQUENTIAL TTS ↔ STT)")
-    print("  Resource-Optimized: Task Pinning & Audio Mutual Exclusion")
-    print("=" * 64)
+    print_banner(ros2_host=ros2_host, ros2_port=ros2_port)
 
     # Pastikan seluruh engine model selesai dimuat dan di-warmup sebelum interaksi
     wait_models_ready(verbose=True)
@@ -327,11 +398,9 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
     try:
         # === STEP 1: Greeting TTS ===
         greeting = responses.greeting()
-        print(f"\n{MAGENTA}[🤖 ROBOT]{RESET} \"{greeting}\"")
+        print_bubble("ROBOT", greeting, CLR_MAGENTA, "🤖")
         if tts_ok:
             speak_and_wait(greeting)
-        else:
-            print("[WARN] Model TTS offline belum siap, melanjutkan tanpa suara robot...")
 
         # Mainkan nada lembut penanda mikrofon siap merekam
         try:
@@ -341,21 +410,23 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
             pass
 
         # === STEP 2: Dengarkan Perintah Pengguna ===
-        print(f"\n{CYAN}[🎤 ANDA]{RESET}  Silakan berbicara perintah Anda (maks {duration} detik)...")
-        command_text = listen_microphone_cli(duration=duration, device=device, prompt="   Perintah: ")
+        print(f"\n{CLR_CYAN}╭─ 🎙️  MIKROFON AKTIF (Maks {duration} detik) ─────────────────────────────────{CLR_RESET}")
+        print(f"{CLR_CYAN}│{CLR_RESET}  Silakan berbicara perintah Anda...")
+        command_text = listen_microphone_cli(duration=duration, device=device, prompt=f"{CLR_CYAN}│{CLR_RESET}  ● Mendengar: ")
+        print(f"{CLR_CYAN}╰─────────────────────────────────────────────────────────────────────{CLR_RESET}")
 
         if not command_text:
-            print(f"\n{RED}[WARN] Tidak ada suara terdeteksi.{RESET}")
+            print(f"\n  {CLR_RED}[WARN] Tidak ada suara terdeteksi.{CLR_RESET}")
             no_sound_msg = "Maaf, saya tidak mendengar perintah. Silakan coba lagi."
-            print(f"{MAGENTA}[🤖 ROBOT]{RESET} \"{no_sound_msg}\"")
+            print_bubble("ROBOT", no_sound_msg, CLR_RED, "🤖")
             if tts_ok:
                 speak_and_wait(no_sound_msg)
             return
 
-        print(f"\n{GREEN}[✓ ANDA]{RESET}  \"{command_text}\"")
+        print_bubble("PENGGUNA", command_text, CLR_GREEN, "👤")
 
         # === STEP 3: NLU Processing ===
-        print(f"\n{YELLOW}[⚙ NLU]{RESET}   Memproses intent dan ekstraksi slot...")
+        print(f"  {CLR_YELLOW}⚙  Memproses intent dan ekstraksi slot NLU...{CLR_RESET}")
         result = pipeline.process(command_text)
 
         # === STEP 4: Cek jika slot kurang (INCOMPLETE) ===
@@ -370,7 +441,7 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
             else:
                 clarify_question = f"Mohon informasikan {translate_slot_names(missing)}."
 
-            print(f"\n{MAGENTA}[🤖 ROBOT]{RESET} \"{clarify_question}\"")
+            print_bubble("ROBOT (Klarifikasi Ruangan)", clarify_question, CLR_YELLOW, "🤖")
             if tts_ok:
                 speak_and_wait(clarify_question)
 
@@ -380,17 +451,19 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
             except Exception:
                 pass
 
-            print(f"\n{CYAN}[🎤 ANDA]{RESET}  Silakan sebutkan jawaban Anda...")
-            answer_text = listen_microphone_cli(duration=duration, device=device, prompt="   Jawaban: ")
+            print(f"\n{CLR_CYAN}╭─ 🎙️  MIKROFON AKTIF (Jawaban) ───────────────────────────────────────{CLR_RESET}")
+            print(f"{CLR_CYAN}│{CLR_RESET}  Silakan sebutkan nama ruangan tujuan...")
+            answer_text = listen_microphone_cli(duration=duration, device=device, prompt=f"{CLR_CYAN}│{CLR_RESET}  ● Mendengar: ")
+            print(f"{CLR_CYAN}╰─────────────────────────────────────────────────────────────────────{CLR_RESET}")
 
             if answer_text:
-                print(f"\n{GREEN}[✓ ANDA]{RESET}  \"{answer_text}\"")
+                print_bubble("PENGGUNA", answer_text, CLR_GREEN, "👤")
                 combined_text = merge_dialog_context(command_text, answer_text, missing)
-                print(f"{YELLOW}[⚙ NLU]{RESET}   Konteks dialog digabungkan: \"{combined_text}\"")
+                print(f"  {CLR_YELLOW}⚙  Konteks dialog digabungkan: \"{combined_text}\"{CLR_RESET}")
                 result = pipeline.process(combined_text)
                 final_text = combined_text
             else:
-                print(f"\n{RED}[WARN] Tidak ada jawaban diterima. Menggunakan hasil parsial.{RESET}")
+                print(f"\n  {CLR_RED}[WARN] Tidak ada jawaban diterima. Menggunakan hasil parsial.{CLR_RESET}")
                 final_text = command_text
         else:
             final_text = command_text
@@ -406,30 +479,37 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
             loc_str = f" ke {loc}" if loc else ""
             ask_confirm = f"Saya akan mengantarkan {obj}{loc_str}. Apakah sudah benar?"
             guide_confirm = "Ucapkan 'benar' untuk lanjut, atau 'tidak' untuk batal."
-            print(f"\n{MAGENTA}[🤖 ROBOT]{RESET} \"{ask_confirm}\"")
-            print(f"{YELLOW}[STATUS]{RESET}  ● Menunggu Konfirmasi: ({guide_confirm})")
+            
+            print_bubble("ROBOT (Konfirmasi Tugas)", ask_confirm, CLR_YELLOW, "⚠️", guide_confirm)
             if tts_ok:
                 speak_and_wait(ask_confirm)
 
-            print(f"\n{CYAN}[🎤 ANDA]{RESET}  {guide_confirm}")
-            yes_no_ans = listen_microphone_cli(duration=duration, device=device, prompt="   Konfirmasi (benar/tidak): ")
+            try:
+                from audio.tts import play_mic_cue
+                play_mic_cue()
+            except Exception:
+                pass
+
+            print(f"\n{CLR_CYAN}╭─ 🎙️  MIKROFON AKTIF (Konfirmasi Benar / Tidak) ──────────────────────{CLR_RESET}")
+            print(f"{CLR_CYAN}│{CLR_RESET}  {guide_confirm}")
+            yes_no_ans = listen_microphone_cli(duration=duration, device=device, prompt=f"{CLR_CYAN}│{CLR_RESET}  ● Mendengar: ")
+            print(f"{CLR_CYAN}╰─────────────────────────────────────────────────────────────────────{CLR_RESET}")
+
             ans_clean = (yes_no_ans or "").lower().strip()
             user_spoken = yes_no_ans.strip() if yes_no_ans else "(tidak ada suara terdeteksi)"
 
-            print(f"\r   Ucapan Konfirmasi: \"\033[36m{user_spoken}\033[0m\"                                  \n")
-
             if any(w in ans_clean for w in ["tidak", "bukan", "batal", "jangan", "salah", "no"]):
                 cancel_msg = "Baik, pengantaran dibatalkan."
-                print(f"{RED}[✕ KONFIRMASI DIBATALKAN]{RESET} Kata terdeteksi: \"{user_spoken}\"")
-                print(f"\n{MAGENTA}[🤖 ROBOT]{RESET} \"{cancel_msg}\"\n")
+                print(f"\n  {CLR_RED}[✕ KONFIRMASI DIBATALKAN]{CLR_RESET} Kata terdeteksi: \"{user_spoken}\"")
+                print_bubble("ROBOT", cancel_msg, CLR_RED, "🤖")
                 if tts_ok:
                     speak_and_wait(cancel_msg)
                 return
             else:
                 confirmed_word = user_spoken if yes_no_ans else "benar"
-                print(f"{GREEN}[✓ KONFIRMASI DISETUJUI]{RESET} Kata terdeteksi: \"{confirmed_word}\"")
+                print(f"\n  {CLR_GREEN}[✓ KONFIRMASI DISETUJUI]{CLR_RESET} Kata terdeteksi: \"{confirmed_word}\"")
 
-        print(f"{MAGENTA}[🤖 ROBOT]{RESET} \"{confirm_msg}\"\n")
+        print_bubble("ROBOT", confirm_msg, CLR_MAGENTA, "🤖")
         if tts_ok and confirm_msg:
             speak_and_wait(confirm_msg)
 
@@ -437,22 +517,19 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
         if result["status"] == "VALID" and result.get("intent") == "NAVIGATE":
             target_loc = result.get("slots", {}).get("location", "tujuan")
             arrival_msg = f"Robot telah tiba di {target_loc}. Ada yang bisa saya bantu lagi?"
-            print(f"{CYAN}[INFO]{RESET} Robot dalam perjalanan... (simulasi navigasi)")
+            print(f"\n  {CLR_CYAN}🚀 Robot dalam perjalanan ke {target_loc}... (simulasi navigasi){CLR_RESET}")
             time.sleep(1.0)
-            print(f"{MAGENTA}[🤖 ROBOT]{RESET} \"{arrival_msg}\"\n")
+            print_bubble("ROBOT", arrival_msg, CLR_GREEN, "🤖")
             if tts_ok:
                 speak_and_wait(arrival_msg)
 
     except KeyboardInterrupt:
-        print("\n[INFO] Mode tugas dibatalkan oleh pengguna.\n")
+        print(f"\n{CLR_MUTED}[INFO] Mode tugas dibatalkan oleh pengguna.{CLR_RESET}\n")
 
 
 def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):
     """Menu CLI interaktif untuk terminal headless / Ubuntu Server."""
-    print("\n" + "=" * 58)
-    print("  ROBOT VOICE COMMAND (CLI / HEADLESS MODE)")
-    print("  Optimal untuk Ubuntu Server & Raspberry Pi 4")
-    print("=" * 58)
+    print_banner(ros2_host=ros2_host, ros2_port=ros2_port)
 
     # Tunggu seluruh model dimuat & di-warmup sebelum menu interaktif ditampilkan
     wait_models_ready(verbose=True)
@@ -461,18 +538,11 @@ def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_ho
     pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
 
     while True:
-        print("\nPilih Mode Operasi:")
-        print("  [1] Mode Tugas Dialog Interaktif (TTS ↔ STT Sequential)")
-        print("  [2] Bicara Langsung via Mikrofon (Streaming STT + NLU)")
-        print("  [3] Ketik Perintah Teks Manual")
-        print("  [4] List Perangkat Input Audio")
-        print("  [5] Tes Diagnosa & Level Volume Mikrofon")
-        print("  [q] Keluar")
-
+        print_menu_card()
         try:
-            choice = input("\nPilihan [1/2/3/4/5/q]: ").strip().lower()
+            choice = input(f"   {CLR_CYAN}❯{CLR_RESET} {CLR_BOLD}Pilih menu [1/2/3/4/5/q]:{CLR_RESET} ").strip().lower()
         except (KeyboardInterrupt, EOFError):
-            print("\nKeluar...")
+            print(f"\n{CLR_MUTED}Keluar dari program...{CLR_RESET}\n")
             break
 
         if choice == "1":
@@ -481,7 +551,8 @@ def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_ho
             record_and_process_cli(pipeline, duration=duration, device=device)
         elif choice == "3":
             try:
-                txt = input("\nMasukkan perintah (misal: 'tolong antar saya ke ruang ICU'): ").strip()
+                print(f"\n  {CLR_CYAN}⌨️  Mode Ketik Manual{CLR_RESET}")
+                txt = input(f"  {CLR_CYAN}❯{CLR_RESET} {CLR_BOLD}Masukkan perintah (misal: 'tolong antar saya ke ruang ICU'):{CLR_RESET} ").strip()
                 if txt:
                     result = pipeline.process(txt)
                     print_result_box(txt, result)
@@ -492,10 +563,10 @@ def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_ho
         elif choice == "5":
             test_mic_hardware(device=device, duration=duration)
         elif choice in ["q", "quit", "exit"]:
-            print("Keluar dari program. Sampai jumpa!\n")
+            print(f"\n  {CLR_GREEN}✓ Keluar dari program. Sampai jumpa!{CLR_RESET}\n")
             break
         else:
-            print("Pilihan tidak valid.")
+            print(f"\n  {CLR_RED}[!] Pilihan tidak valid, silakan ketik nomor 1-5 atau q.{CLR_RESET}")
 
 
 def run_text_mode(text: str, ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):
