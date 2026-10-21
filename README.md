@@ -123,10 +123,10 @@ z_{t, u} = \text{Joiner}(h_t, p_u) = W_z \tanh(W_h h_t + W_p p_u + b_z)
 $$
 
 **4. Distribusi Probabilitas Output**  
-Distribusi probabilitas atas alfabet token $\mathcal{Y} \cup \{\varnothing\}$ ($\varnothing$ merepresentasikan simbol transisi *blank*):
+Distribusi probabilitas atas alfabet token $\mathcal{Y} \cup \lbrace \varnothing \rbrace$ ($\varnothing$ merepresentasikan simbol transisi *blank*):
 
 $$
-P(y_{t,u} \mid X, Y_{<u}) = \text{Softmax}(z_{t, u}) = \frac{\exp(z_{t, u, k})}{\sum_{j \in \mathcal{Y} \cup \{\varnothing\}} \exp(z_{t, u, j})}
+P(y_{t,u} \mid X, Y_{\lt u}) = \text{Softmax}(z_{t, u}) = \frac{\exp(z_{t, u, k})}{\sum_{j \in \mathcal{Y} \cup \lbrace \varnothing \rbrace} \exp(z_{t, u, j})}
 $$
 
 **5. Streaming Chunk & Latency Optimization**  
@@ -185,7 +185,7 @@ $$
 $$
 
 **Pencegahan False Positive**:  
-Kata awalan generik $\mathcal{W}_{\text{prefix}} = \{\text{ruang}, \text{ruangan}, \text{poli}, \text{kamar}, \text{tempat}\}$ **dilarang** berdiri sendiri sebagai target pencocokan fuzzy. Aturan ini memotong anomali di mana kata `"ruang"` (panjang 5) salah terasosiasi ke `"ruang 1"` (panjang 7) karena kemiripan bernilai $\frac{10}{12} \approx 0.833$.
+Kata awalan generik $\mathcal{W}_{\text{prefix}} = \lbrace \text{ruang}, \text{ruangan}, \text{poli}, \text{kamar}, \text{tempat} \rbrace$ **dilarang** berdiri sendiri sebagai target pencocokan fuzzy. Aturan ini memotong anomali di mana kata `"ruang"` (panjang 5) salah terasosiasi ke `"ruang 1"` (panjang 7) karena kemiripan bernilai $\frac{10}{12} \approx 0.833$.
 
 > [!NOTE]
 > **Pustaka & Referensi Ilmiah**:
@@ -221,7 +221,7 @@ FSM melakukan *single-pass parsing* berkecepatan tinggi ($\mathcal{O}(N)$ linier
 ```
 
 #### 1. Mode Digit Sequence (Penyebutan Angka Terpisah):
-Digunakan saat seluruh kata terdeteksi sebagai angka satuan tunggal ($d_i \in \{0, \dots, 9\}$):
+Digunakan saat seluruh kata terdeteksi sebagai angka satuan tunggal ($d_i \in \lbrace 0, \dots, 9 \rbrace$):
 
 $$
 N = \sum_{i=0}^{k-1} d_i \cdot 10^{k-1-i}
