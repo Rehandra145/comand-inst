@@ -20,6 +20,7 @@ from gui.theme import (
     COLOR_GREEN_BG,
     COLOR_GREEN_BORDER,
     COLOR_AMBER,
+    COLOR_AMBER_BG,
     COLOR_AMBER_BORDER,
     COLOR_RED,
     COLOR_RED_BG,
