@@ -26,6 +26,14 @@ from nlu.dialog import (
     get_confirmation_message,
 )
 
+# Pastikan output terminal aman di Windows (UTF-8 fallback replace)
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 try:
     from audio.scheduler import scheduler, set_thread_high_priority
 except ImportError:
@@ -33,6 +41,62 @@ except ImportError:
     set_thread_high_priority = lambda: None
 
 logger = logging.getLogger(__name__)
+
+
+def wait_models_ready(verbose: bool = True):
+    """
+    Tunggu sampai seluruh engine model (STT Sherpa-ONNX dan TTS Piper VITS)
+    selesai dimuat ke memori dan di-warmup sebelum pengguna memasukkan input di CLI.
+    """
+    from audio.stt import get_recognizer, is_ready
+    from audio.tts import warmup, is_tts_available
+
+    if is_ready() and is_tts_available():
+        return
+
+    if verbose:
+        print("\n" + "-" * 60)
+        print("  [*] Menyiapkan & memuat seluruh engine (warming up)...")
+        print("  Mohon tunggu sebentar sampai semua model siap.")
+        print("-" * 60)
+
+    # Redam logger sementara agar tampilan CLI rapi
+    stt_logger = logging.getLogger("audio.stt")
+    tts_logger = logging.getLogger("audio.tts")
+    prev_stt_level = stt_logger.level
+    prev_tts_level = tts_logger.level
+
+    try:
+        stt_logger.setLevel(logging.WARNING)
+        tts_logger.setLevel(logging.WARNING)
+
+        # 1. Load Model STT
+        if not is_ready():
+            if verbose:
+                sys.stdout.write("  [1/2] Engine STT (Zipformer RNN-T Streaming) : Memuat model... ")
+                sys.stdout.flush()
+            t0 = time.time()
+            get_recognizer()
+            if verbose:
+                sys.stdout.write(f"\033[1;32m[SIAP]\033[0m ({time.time() - t0:.1f}s)\n")
+                sys.stdout.flush()
+
+        # 2. Warmup Engine TTS & Cache
+        if verbose:
+            sys.stdout.write("  [2/2] Engine TTS (Piper VITS Offline & Cache): Melakukan warmup... ")
+            sys.stdout.flush()
+        t0 = time.time()
+        warmup()
+        if verbose:
+            sys.stdout.write(f"\033[1;32m[SIAP]\033[0m ({time.time() - t0:.1f}s)\n")
+            sys.stdout.flush()
+
+        if verbose:
+            print("  \033[1;32m[+] Semua model siap! Sistem siap menerima perintah.\033[0m")
+            print("-" * 60 + "\n")
+    finally:
+        stt_logger.setLevel(prev_stt_level)
+        tts_logger.setLevel(prev_tts_level)
 
 
 def print_result_box(text: str, result: dict):
@@ -217,6 +281,7 @@ def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, promp
 
 def record_and_process_cli(pipeline, duration: int = 5, device: Optional[int] = None):
     """Rekam audio dari mikrofon dan proses real-time streaming di terminal."""
+    wait_models_ready(verbose=True)
     print(f"\n[LISTENING] Silakan berbicara (maks {duration} detik)... Selesai bicara otomatis diproses.")
     text = listen_microphone_cli(duration=duration, device=device, prompt="   Live Audio Stream: ")
     print(f"\r   Transkripsi Akhir: \"\033[32m{text}\033[0m\"                                  \n")
@@ -238,16 +303,6 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
     - Audio caching: kalimat umum di-sintesis dengan 0 ms latency
     - Task pinning & scheduling priority diterapkan otomatis
     """
-    from audio.stt import preload_async as stt_preload_async
-    from nlu.pipeline import NLUPipeline
-    from audio.tts import speak_and_wait, is_tts_available, warmup_async
-
-    # Load model STT di background selagi greeting TTS diputar
-    stt_preload_async()
-    warmup_async()
-    pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
-    tts_ok = is_tts_available()
-
     CYAN = "\033[1;36m"
     GREEN = "\033[1;32m"
     YELLOW = "\033[1;33m"
@@ -259,6 +314,15 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
     print("  MODE TUGAS DIALOG INTERAKTIF (SEQUENTIAL TTS ↔ STT)")
     print("  Resource-Optimized: Task Pinning & Audio Mutual Exclusion")
     print("=" * 64)
+
+    # Pastikan seluruh engine model selesai dimuat dan di-warmup sebelum interaksi
+    wait_models_ready(verbose=True)
+
+    from nlu.pipeline import NLUPipeline
+    from audio.tts import speak_and_wait, is_tts_available
+
+    pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
+    tts_ok = is_tts_available()
 
     try:
         # === STEP 1: Greeting TTS ===
@@ -385,18 +449,16 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
 
 def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):
     """Menu CLI interaktif untuk terminal headless / Ubuntu Server."""
-    from audio.stt import preload_async as stt_preload_async
-    from nlu.pipeline import NLUPipeline
-    from audio.tts import warmup_async
-
-    stt_preload_async()
-    warmup_async()
-    pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
-
     print("\n" + "=" * 58)
     print("  ROBOT VOICE COMMAND (CLI / HEADLESS MODE)")
     print("  Optimal untuk Ubuntu Server & Raspberry Pi 4")
     print("=" * 58)
+
+    # Tunggu seluruh model dimuat & di-warmup sebelum menu interaktif ditampilkan
+    wait_models_ready(verbose=True)
+
+    from nlu.pipeline import NLUPipeline
+    pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
 
     while True:
         print("\nPilih Mode Operasi:")

@@ -9,6 +9,7 @@ from cli.runner import (
     run_task_cli,
     run_cli_interactive,
     run_text_mode,
+    wait_models_ready,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "run_task_cli",
     "run_cli_interactive",
     "run_text_mode",
+    "wait_models_ready",
 ]

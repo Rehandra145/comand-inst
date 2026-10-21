@@ -174,8 +174,6 @@ if __name__ == "__main__":
 
     # 4. Direct terminal mic mode
     if args.mic:
-        from audio.stt import preload_async as stt_preload_async
-        stt_preload_async()
         from nlu.pipeline import NLUPipeline
         pipeline = NLUPipeline(ros2_host=args.ros2_host, ros2_port=args.ros2_port)
         record_and_process_cli(pipeline, duration=args.duration, device=args.device)
