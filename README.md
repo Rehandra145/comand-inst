@@ -164,7 +164,7 @@ Di mana:
 
 ### 2.3 Dynamic Room Parser: Grammar State Machine (FSM)
 
-Diadopsi dari arsitektur state machine C++ ([`parser.cpp`](file:///c:/Users/hande/command-inst/parser.cpp)), modul ini mengimplementasikan **Deterministic Finite Automaton (DFA)** berbasis *lexical shift-reduce* untuk mengenali penomoran ruangan dinamis tanpa batas (*infinite vocabulary*).
+Modul ini mengimplementasikan **Deterministic Finite Automaton (DFA)** berbasis *lexical shift-reduce* untuk mengenali penomoran ruangan dinamis tanpa batas (*infinite vocabulary*).
 
 #### Alasan Arsitektural:
 Di rumah sakit nyata, penomoran ruangan mustahil didaftarkan satu per satu secara statis. Pasien atau tenaga medis dapat menyebutkan nomor kamar secara kasual dalam dua gaya yang sangat berbeda:
@@ -397,7 +397,7 @@ command-inst/
 ├── stt.py                 # Engine STT Sherpa-ONNX streaming-native (in-memory)
 ├── tts.py                 # Engine TTS offline (Piper VITS), audio cache, & warmup
 ├── scheduler.py           # Resource scheduler, task pinning, thread priority, mutual exclusion
-├── download_tts_model.py  # Script downloader & verifikasi model TTS bahasa Indonesia
+├── download_model.py      # Script downloader & verifikasi model STT & TTS bahasa Indonesia
 ├── model/
 │   ├── ...                # Model ONNX RNN-T (encoder, decoder, joiner, tokens)
 │   └── tts/               # Model ONNX Piper VITS (id_ID-news_tts-medium.onnx, tokens, data)
@@ -411,9 +411,10 @@ command-inst/
 │   ├── slot_extractor.py  # Ekstraktor slot (FSM parser C++ + Fuzzy pattern matcher)
 │   └── valid_rooms.json   # Basis data konfigurasi 70+ nama ruangan valid
 ├── tests/
-│   └── test_nlu.py        # Unit & E2E Test Suite (96 test cases)
-├── parser.cpp             # Referensi implementasi C++ parser nomor ruangan
+│   └── test_nlu.py        # Unit & E2E Test Suite (99 test cases)
+├── quantize_model.py      # Script quantisasi model ONNX ke INT8 untuk Raspberry Pi
 ├── pyproject.toml         # Konfigurasi dependensi project (uv / pip)
+├── requirements.txt       # Requirements pip standar
 └── README.md              # Dokumentasi teknis & panduan lengkap
 ```
 
@@ -448,14 +449,14 @@ pip install -r requirements.txt
 > sudo apt update && sudo apt install -y portaudio19-dev libasound2-dev libsndfile1 python3-tk
 > ```
 
-### Setup Model Offline TTS (Wajib untuk Mode Tugas)
-Untuk mengaktifkan suara robot pada Mode Tugas (baik GUI maupun CLI), unduh model Sherpa-ONNX Piper VITS bahasa Indonesia:
+### Setup Model Offline STT & TTS
+Untuk mengunduh dan memverifikasi kelengkapan model offline STT (Zipformer RNN-T) dan TTS (Piper VITS):
 ```bash
-uv run python download_tts_model.py
+uv run python download_model.py
 # atau:
-python download_tts_model.py
+python download_model.py
 ```
-Model akan diekstrak secara otomatis ke `model/tts/` (~60 MB).
+> Skrip secara otomatis mendeteksi model yang sudah ada di folder `model/` dan hanya mengunduh file yang belum tersedia tanpa mengulang dari awal. Anda juga dapat menggunakan opsi `--stt` atau `--tts` untuk mengunduh model tertentu saja.
 
 ---
 

@@ -102,7 +102,7 @@ def _get_tts_engine():
         if not model_path.exists():
             logger.error(
                 f"[TTS] Model tidak ditemukan di '{TTS_MODEL_DIR}'. "
-                "Jalankan: python download_tts_model.py"
+                "Jalankan: python download_model.py"
             )
             return None
 

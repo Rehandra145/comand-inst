@@ -141,7 +141,7 @@ wheels = [
 [[package]]
 name = "command-inst"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -159,8 +159,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.2.6" },
-    { name = "onnxruntime", specifier = ">=1.23.2" },
-    { name = "scikit-learn", specifier = ">=1.7.2" },
+    { name = "onnxruntime", specifier = ">=1.20.0" },
+    { name = "scikit-learn", specifier = ">=1.5.0" },
     { name = "sherpa-onnx", specifier = ">=1.13.8" },
     { name = "sherpa-onnx-bin", specifier = ">=1.13.8" },
     { name = "sounddevice", specifier = ">=0.5.6" },

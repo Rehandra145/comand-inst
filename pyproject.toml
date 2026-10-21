@@ -1,7 +1,7 @@
 [project]
 name = "command-inst"
 version = "0.1.0"
-description = "Add your description here"
+description = "Robot Voice Command NLU Pipeline for Hospital Service Robot"
 readme = "README.md"
 authors = [
     { name = "Rehandra145", email = "rehandra09052004@gmail.com" }
@@ -9,17 +9,13 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=2.2.6",
-    "onnxruntime>=1.23.2",
-    "scikit-learn>=1.7.2",
+    "onnxruntime>=1.20.0",
+    "scikit-learn>=1.5.0",
     "sherpa-onnx>=1.13.8",
     "sherpa-onnx-bin>=1.13.8",
     "sounddevice>=0.5.6",
     "soundfile>=0.14.0",
 ]
 
-[project.scripts]
-command-inst = "command_inst:main"
-
-[build-system]
-requires = ["uv_build>=0.12.20,<0.13.0"]
-build-backend = "uv_build"
+[tool.uv]
+package = false
