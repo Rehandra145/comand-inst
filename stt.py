@@ -39,6 +39,11 @@ def _optimized_path(src: Path) -> Path:
 
 def _ensure_optimized_encoder(src: Path) -> Optional[Path]:
     """Kembalikan path encoder teroptimasi (buat jika belum ada / kadaluarsa)."""
+    # Model INT8 sudah terkuantisasi dan memakai ConvInteger yang tidak didukung
+    # graph optimization ONNX Runtime CPU. Langsung gunakan model INT8 apa adanya.
+    if ".int8." in src.name:
+        return src
+
     opt = _optimized_path(src)
     try:
         if opt.exists() and opt.stat().st_mtime >= src.stat().st_mtime:
