@@ -100,25 +100,41 @@ Previous Non-Blank Tokens ──────────────────
 ```
 
 #### Formulasi Matematis:
+
 1. **Acoustic / Transcription Network (Encoder)**:
    Menerima vektor fitur filterbank 80-dimensi $X = (x_1, x_2, \dots, x_T)$ dan menghasilkan representasi akustik laten:
-   $$h_t = \text{Encoder}(x_t), \quad t \in [1, T]$$
+
+   $$
+   h_t = \text{Encoder}(x_t), \quad t \in [1, T]
+   $$
 
 2. **Prediction Network (Decoder)**:
    Menerima urutan token teks non-blank yang telah diprediksi sebelumnya $Y_{<u} = (y_1, y_2, \dots, y_{u-1})$:
-   $$p_u = \text{Decoder}(y_{u-1}), \quad u \in [1, U]$$
+
+   $$
+   p_u = \text{Decoder}(y_{u-1}), \quad u \in [1, U]
+   $$
 
 3. **Joint Network (Joiner)**:
    Menggabungkan representasi akustik $h_t$ dan representasi linguistik $p_u$ melalui proyeksi linier dan fungsi aktivasi non-linier $\tanh$:
-   $$z_{t, u} = \text{Joiner}(h_t, p_u) = W_z \tanh(W_h h_t + W_p p_u + b_z)$$
+
+   $$
+   z_{t, u} = \text{Joiner}(h_t, p_u) = W_z \tanh(W_h h_t + W_p p_u + b_z)
+   $$
 
 4. **Distribusi Probabilitas Output**:
    Distribusi probabilitas atas alfabet token $\mathcal{Y} \cup \{\varnothing\}$ ($\varnothing$ merepresentasikan simbol transisi *blank*):
-   $$P(y_{t,u} \mid X, Y_{<u}) = \text{Softmax}(z_{t, u}) = \frac{\exp(z_{t, u, k})}{\sum_{j \in \mathcal{Y} \cup \{\varnothing\}} \exp(z_{t, u, j})}$$
+
+   $$
+   P(y_{t,u} \mid X, Y_{<u}) = \text{Softmax}(z_{t, u}) = \frac{\exp(z_{t, u, k})}{\sum_{j \in \mathcal{Y} \cup \{\varnothing\}} \exp(z_{t, u, j})}
+   $$
 
 5. **Streaming Chunk & Latency Optimization**:
    Audio dialirkan dalam potongan buffer berukuran 100 ms ($N = 1600$ sampel pada frekuensi sampling 16 kHz). Menggunakan decoding *Greedy Search* ($\hat{y} = \arg\max P(y_{t,u})$) yang berkonsumsi CPU minimal tanpa overhead percabangan *beam search*, sehingga *perceived latency* saat pengguna selesai berucap praktis mendekati instan:
-   $$\text{Perceived Latency} = t_{\text{speech-end}} - t_{\text{decode-complete}} \approx \mathbf{0.00\text{ ms}}$$
+
+   $$
+   \text{Perceived Latency} = t_{\text{speech-end}} - t_{\text{decode-complete}} \approx \mathbf{0.00\text{ ms}}
+   $$
 
 > [!NOTE]
 > **Pustaka & Referensi Ilmiah**:
@@ -139,19 +155,36 @@ Algoritma *Levenshtein Distance* hanya menghitung jumlah operasi edit tunggal ka
 3. Pendekatan ini terbukti jauh lebih toleran terhadap kesalahan transkripsi fonetik bahasa Indonesia yang sering mengalami pergeseran vokal atau penghilangan glottal stop.
 
 #### Formulasi Matematis:
+
 Diberikan string input $S_1$ dan string target $S_2$:
-$$\text{Similarity}(S_1, S_2) = \frac{2 \cdot |\mathcal{K}_{\text{match}}|}{|S_1| + |S_2|}$$
+
+$$
+\text{Similarity}(S_1, S_2) = \frac{2 \cdot |\mathcal{K}_{\text{match}}|}{|S_1| + |S_2|}
+$$
 
 Di mana:
-- $|\mathcal{K}_{\text{match}}|$ adalah total jumlah karakter pada seluruh potongan substring kontigu terpanjang yang sama (*common contiguous substrings*), dihitung secara rekursif:
-  $$|\mathcal{K}_{\text{match}}| = |S_{\text{LCS}}| + |\mathcal{K}_{\text{left}}| + |\mathcal{K}_{\text{right}}|$$
-- $|S_1|$ dan $|S_2|$ adalah panjang karakter string pertama dan kedua ($0.0 \le \text{Similarity} \le 1.0$).
+- **$|\mathcal{K}_{\text{match}}|$** adalah total jumlah karakter pada seluruh potongan substring kontigu terpanjang yang sama (*common contiguous substrings*), dihitung secara rekursif:
+
+  $$
+  |\mathcal{K}_{\text{match}}| = |S_{\text{LCS}}| + |\mathcal{K}_{\text{left}}| + |\mathcal{K}_{\text{right}}|
+  $$
+
+- **$|S_1|$** dan **$|S_2|$** adalah panjang karakter masing-masing string ($0.0 \le \text{Similarity} \le 1.0$).
 
 #### Matriks Ambang Batas (Threshold) & Isolasi False Positive:
-- **Intent Core Action Words**: Ambang batas $\ge 0.75$
-  $$\text{Similarity}(\text{"bahwa"}, \text{"bawa"}) = \frac{2 \times 4}{5 + 4} = \frac{8}{9} \approx 0.889 \ge 0.75 \implies \text{NAVIGATE}$$
-- **Entity Location Words**: Ambang batas $\ge 0.78$
-  $$\text{Similarity}(\text{"mlati"}, \text{"melati"}) = \frac{2 \times 5}{5 + 6} = \frac{10}{11} \approx 0.909 \ge 0.78 \implies \text{"ruang melati"}$$
+
+- **Intent Core Action Words** (Ambang batas $\ge 0.75$):
+
+  $$
+  \text{Similarity}(\text{"bahwa"}, \text{"bawa"}) = \frac{2 \times 4}{5 + 4} = \frac{8}{9} \approx 0.889 \ge 0.75 \implies \text{NAVIGATE}
+  $$
+
+- **Entity Location Words** (Ambang batas $\ge 0.78$):
+
+  $$
+  \text{Similarity}(\text{"mlati"}, \text{"melati"}) = \frac{2 \times 5}{5 + 6} = \frac{10}{11} \approx 0.909 \ge 0.78 \implies \text{"ruang melati"}
+  $$
+
 - **Pencegahan False Positive**:
   Kata awalan generik $\mathcal{W}_{\text{prefix}} = \{\text{ruang}, \text{ruangan}, \text{poli}, \text{kamar}, \text{tempat}\}$ **dilarang** berdiri sendiri sebagai target pencocokan fuzzy. Aturan ini memotong anomali di mana kata `"ruang"` (panjang 5) salah terasosiasi ke `"ruang 1"` (panjang 7) karena kemiripan bernilai $\frac{10}{12} \approx 0.833$.
 
@@ -190,9 +223,16 @@ FSM melakukan *single-pass parsing* berkecepatan tinggi ($\mathcal{O}(N)$ linier
 
 #### 1. Mode Digit Sequence (Penyebutan Angka Terpisah):
 Digunakan saat seluruh kata terdeteksi sebagai angka satuan tunggal ($d_i \in \{0, \dots, 9\}$):
-$$N = \sum_{i=0}^{k-1} d_i \cdot 10^{k-1-i}$$
+
+$$
+N = \sum_{i=0}^{k-1} d_i \cdot 10^{k-1-i}
+$$
+
 Contoh:
-$$[\text{"satu"}, \text{"nol"}, \text{"empat"}] \rightarrow [1, 0, 4] \implies 1 \cdot 10^2 + 0 \cdot 10^1 + 4 \cdot 10^0 = 104 \implies \text{"ruang 104"}$$
+
+$$
+[\text{"satu"}, \text{"nol"}, \text{"empat"}] \rightarrow [1, 0, 4] \implies 1 \cdot 10^2 + 0 \cdot 10^1 + 4 \cdot 10^0 = 104 \implies \text{"ruang 104"}
+$$
 
 #### 2. Mode Compound Grammar (Bilangan Berstruktur Majemuk):
 FSM mengevaluasi transisi kata tingkatan (*multipliers*):
@@ -216,10 +256,13 @@ Untuk menjamin keselamatan fisik (*safety-critical constraint*) pergerakan robot
 Robot pelayanan rumah sakit tidak boleh mengeksekusi navigasi ke ruangan fiktif, halusinasi NLU, atau area terlarang (misal: `"ruang 999"` atau `"ruang antah berantah"`). Layer ini memvalidasi keabsahan tujuan sebelum instruksi dikirim ke kontroler motor robot.
 
 #### Formulasi Matematis:
-$$\text{Status}(loc) = \begin{cases} 
+
+$$
+\text{Status}(loc) = \begin{cases} 
 \text{VALID}, & \text{jika } \text{lower}(loc) \in \mathcal{S}_{\text{valid}} \\
 \text{INVALID-LOCATION}, & \text{jika } \text{lower}(loc) \notin \mathcal{S}_{\text{valid}}
-\end{cases}$$
+\end{cases}
+$$
 
 Di mana $\mathcal{S}_{\text{valid}}$ diindeks sebagai struktur data **Hash Set** (`set` Python):
 - **Kompleksitas Komputasi**: $\mathcal{O}(1)$ average lookup time melalui fungsi dispersi *hash table* (Open Addressing dengan Algoritma Perturbasi CPython).
