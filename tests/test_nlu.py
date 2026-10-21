@@ -171,12 +171,71 @@ def test_intent_classification():
         "ikuti dokter",
     ]
 
-    print("\n  FOLLOW:")
-    for text in follow_cases:
+    # --- EMERGENCY ---
+    emergency_cases = [
+        "kondisi darurat",
+        "keadaan darurat",
+        "kode merah",
+        "darurat",
+        "emergency",
+    ]
+
+    print("\n  EMERGENCY:")
+    for text in emergency_cases:
         result = classifier.classify(text)
         assert_equal(
             f'"{text}" → {result.intent}',
-            Intent.FOLLOW,
+            Intent.EMERGENCY,
+            result.intent,
+        )
+
+    # --- STATUS ---
+    status_cases = [
+        "status baterai",
+        "cek baterai",
+        "status robot",
+        "kamu di mana",
+    ]
+
+    print("\n  STATUS:")
+    for text in status_cases:
+        result = classifier.classify(text)
+        assert_equal(
+            f'"{text}" → {result.intent}',
+            Intent.STATUS,
+            result.intent,
+        )
+
+    # --- GREETING ---
+    greeting_cases = [
+        "halo robot",
+        "halo",
+        "hai",
+        "selamat pagi",
+    ]
+
+    print("\n  GREETING:")
+    for text in greeting_cases:
+        result = classifier.classify(text)
+        assert_equal(
+            f'"{text}" → {result.intent}',
+            Intent.GREETING,
+            result.intent,
+        )
+
+    # --- THANK ---
+    thank_cases = [
+        "terima kasih",
+        "makasih banyak",
+        "makasih ya",
+    ]
+
+    print("\n  THANK:")
+    for text in thank_cases:
+        result = classifier.classify(text)
+        assert_equal(
+            f'"{text}" → {result.intent}',
+            Intent.THANK,
             result.intent,
         )
 
@@ -422,7 +481,8 @@ def test_pipeline_e2e():
     print("TEST: End-to-End Pipeline")
     print("=" * 50)
 
-    pipeline = NLUPipeline()
+    from nlu.ros2_adapter import MockROS2Adapter
+    pipeline = NLUPipeline(ros2_adapter=MockROS2Adapter())
 
     # --- NAVIGATE ---
     print("\n  E2E NAVIGATE:")
@@ -535,6 +595,31 @@ def test_pipeline_e2e():
         "GO_BACK",
         result["intent"],
     )
+
+    # --- EMERGENCY ---
+    print("\n  E2E EMERGENCY:")
+    result_emg = pipeline.process("keadaan darurat segera ke ruang ICU")
+    assert_equal('"keadaan darurat segera ke ruang ICU" -> EMERGENCY', "EMERGENCY", result_emg["intent"])
+    assert_equal('location = ruang ICU', "ruang ICU", result_emg["slots"].get("location"))
+    assert_equal("status = VALID", "VALID", result_emg["status"])
+
+    # --- STATUS ---
+    print("\n  E2E STATUS:")
+    result_stat = pipeline.process("cek status baterai")
+    assert_equal('"cek status baterai" -> STATUS', "STATUS", result_stat["intent"])
+    assert_equal("status = VALID", "VALID", result_stat["status"])
+
+    # --- GREETING ---
+    print("\n  E2E GREETING:")
+    result_greet = pipeline.process("halo robot selamat pagi")
+    assert_equal('"halo robot selamat pagi" -> GREETING', "GREETING", result_greet["intent"])
+    assert_equal("status = VALID", "VALID", result_greet["status"])
+
+    # --- THANK ---
+    print("\n  E2E THANK:")
+    result_thk = pipeline.process("terima kasih banyak")
+    assert_equal('"terima kasih banyak" -> THANK', "THANK", result_thk["intent"])
+    assert_equal("status = VALID", "VALID", result_thk["status"])
 
     # --- UNKNOWN ---
     print("\n  E2E UNKNOWN:")

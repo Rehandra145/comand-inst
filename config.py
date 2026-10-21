@@ -14,4 +14,8 @@ NUM_THREADS = 4
 
 # Index default perangkat mikrofon (None = otomatis deteksi perangkat input aktif)
 # Bisa diisi angka ID spesifik (misal: DEFAULT_MIC_DEVICE = 2 untuk USB Mic)
-DEFAULT_MIC_DEVICE = 1
+DEFAULT_MIC_DEVICE = 0
+
+# Default ROS 2 TCP Socket Node Target
+DEFAULT_ROS2_HOST = "10.107.245.221"
+DEFAULT_ROS2_PORT = 5000

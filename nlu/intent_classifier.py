@@ -22,6 +22,10 @@ class Intent:
     GO_BACK = "GO_BACK"
     WAIT = "WAIT"
     FOLLOW = "FOLLOW"
+    GREETING = "GREETING"
+    THANK = "THANK"
+    EMERGENCY = "EMERGENCY"
+    STATUS = "STATUS"
     UNKNOWN = "UNKNOWN"
 
 
@@ -44,6 +48,10 @@ _VALID_RESULTS = {
     Intent.GO_BACK: IntentResult(intent=Intent.GO_BACK, confidence=1.0),
     Intent.WAIT: IntentResult(intent=Intent.WAIT, confidence=1.0),
     Intent.FOLLOW: IntentResult(intent=Intent.FOLLOW, confidence=1.0),
+    Intent.GREETING: IntentResult(intent=Intent.GREETING, confidence=1.0),
+    Intent.THANK: IntentResult(intent=Intent.THANK, confidence=1.0),
+    Intent.EMERGENCY: IntentResult(intent=Intent.EMERGENCY, confidence=1.0),
+    Intent.STATUS: IntentResult(intent=Intent.STATUS, confidence=1.0),
 }
 
 
@@ -52,12 +60,16 @@ _VALID_RESULTS = {
 # =========================
 
 _FUZZY_CORE_TRIGGERS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    (Intent.STOP, ("berhenti", "hentikan", "stop")),
+    (Intent.EMERGENCY, ("darurat", "emergency")),
+    (Intent.STOP, ("berhenti", "hentikan")),
     (Intent.WAIT, ("tunggu", "standby")),
-    (Intent.FOLLOW, ("ikuti", "ikut", "follow")),
-    (Intent.GO_BACK, ("kembali", "balik")),
-    (Intent.NAVIGATE, ("antar", "antarkan", "bawa", "bawakan", "pergi", "menuju")),
+    (Intent.FOLLOW, ("ikuti", "follow")),
+    (Intent.GO_BACK, ("kembali", "putar balik")),
+    (Intent.NAVIGATE, ("antar", "antarkan", "bawakan", "menuju")),
     (Intent.MOVE, ("maju", "mundur", "belok")),
+    (Intent.STATUS, ("baterai", "status")),
+    (Intent.GREETING, ("halo", "assalamualaikum")),
+    (Intent.THANK, ("makasih", "terimakasih")),
 )
 
 # Ambiguous words to ignore in fuzzy matching
@@ -95,6 +107,17 @@ class KeywordIntentClassifier(BaseIntentClassifier):
 
         # Keyword patterns ordered by priority (first match wins)
         self._patterns: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+            # EMERGENCY — highest priority
+            (Intent.EMERGENCY, (
+                "keadaan darurat",
+                "kondisi darurat",
+                "kode merah",
+                "darurat",
+                "emergency",
+                "butuh bantuan segera",
+                "tolong darurat",
+            )),
+
             # STOP — high priority
             (Intent.STOP, (
                 "berhenti sekarang",
@@ -197,6 +220,41 @@ class KeywordIntentClassifier(BaseIntentClassifier):
                 "gerak",
                 "jalan",
             )),
+
+            # STATUS — cek status / baterai
+            (Intent.STATUS, (
+                "status baterai",
+                "cek baterai",
+                "berapa baterai",
+                "kondisi baterai",
+                "status robot",
+                "cek status",
+                "kamu di mana",
+                "posisi kamu",
+            )),
+
+            # GREETING — sapaan
+            (Intent.GREETING, (
+                "selamat pagi",
+                "selamat siang",
+                "selamat sore",
+                "selamat malam",
+                "halo robot",
+                "hai robot",
+                "halo",
+                "hai",
+                "assalamualaikum",
+            )),
+
+            # THANK — ucapan terima kasih
+            (Intent.THANK, (
+                "terima kasih banyak",
+                "terima kasih",
+                "makasih banyak",
+                "makasih ya",
+                "makasih",
+                "thanks",
+            )),
         )
 
     def classify(self, text: str) -> IntentResult:
@@ -205,10 +263,15 @@ class KeywordIntentClassifier(BaseIntentClassifier):
         if not text_lower:
             return _UNKNOWN_RESULT
 
-        # 1. Fast-path: Exact substring keyword matching
+        # 1. Fast-path: Keyword matching
+        words_in_text = set(text_lower.split())
         for intent, keywords in self._patterns:
             for keyword in keywords:
-                if keyword in text_lower:
+                # Untuk keyword sangat pendek (<= 3 karakter seperti "hai"), periksa sebagai kata utuh
+                if len(keyword) <= 3:
+                    if keyword in words_in_text:
+                        return _VALID_RESULTS[intent]
+                elif keyword in text_lower:
                     return _VALID_RESULTS[intent]
 
         # 2. Fallback: Fuzzy word similarity matching (menangani typo STT seperti "bawak", "bahwa", "berenti")

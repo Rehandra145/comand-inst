@@ -11,3 +11,6 @@ wheels/
 
 # Temporary audio test files
 *.wav
+
+# Local custom hardware / robot configuration
+ros2_config.json

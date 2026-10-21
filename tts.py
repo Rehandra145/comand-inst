@@ -233,8 +233,14 @@ _current_sd_stream = None
 def _play_sounddevice(samples: np.ndarray, sample_rate: int):
     """Playback via sounddevice (cross-platform, blocking)."""
     import sounddevice as sd
-    sd.play(samples, samplerate=sample_rate)
+    import time
+    # Tambahkan padding hening 0.25 detik di akhir agar driver audio Windows
+    # tidak memotong suku kata terakhir saat sd.wait() selesai.
+    pad_len = int(sample_rate * 0.25)
+    padded_samples = np.pad(samples, (0, pad_len), mode="constant")
+    sd.play(padded_samples, samplerate=sample_rate)
     sd.wait()
+    time.sleep(0.35)  # Beri waktu buffer soundcard dan reverb ruangan reda tuntas
 
 
 def _play_aplay(samples: np.ndarray, sample_rate: int, device: str = SPEAKER_DEVICE_ALSA):
@@ -334,3 +340,37 @@ def speak_and_wait(text: str, speed: float = TTS_SPEED) -> bool:
 def is_tts_available() -> bool:
     """Cek apakah TTS engine tersedia dan model terdownload."""
     return _get_tts_engine() is not None
+
+
+def play_mic_cue():
+    """
+    Mainkan nada singkat dan lembut (chime / beep) penanda mikrofon siap mendengarkan.
+    Memberikan isyarat audio instan bagi pengguna bahwa sekarang saatnya berbicara.
+    Dilengkapi jeda settling akustik agar speaker tuntas dan tidak membocorkan audio ke mikrofon.
+    """
+    try:
+        import sounddevice as sd
+        sr = 16000
+        # Nada dua-nada lembut D5 (587Hz, 45ms) -> A5 (880Hz, 60ms) dengan amplitudo terukur (rendah distorsi)
+        t1 = np.linspace(0, 0.045, int(sr * 0.045), False)
+        t2 = np.linspace(0, 0.060, int(sr * 0.060), False)
+        tone1 = 0.06 * np.sin(2 * np.pi * 587.33 * t1)
+        tone2 = 0.07 * np.sin(2 * np.pi * 880.00 * t2)
+        # Smoothing window to prevent clicks and sharp transients
+        w1 = np.hanning(len(tone1) * 2)[len(tone1):]
+        w2 = np.hanning(len(tone2) * 2)[len(tone2):]
+        cue = np.concatenate([tone1 * w1, tone2 * w2]).astype(np.float32)
+        pad = np.zeros(int(sr * 0.08), dtype=np.float32)
+        cue = np.concatenate([cue, pad])
+        sd.play(cue, samplerate=sr)
+        sd.wait()
+        try:
+            sd.stop()
+        except Exception:
+            pass
+        # Jeda settling akustik (200ms) agar buffer soundcard tuntas
+        # dan gema ruangan hilang sepenuhnya sebelum mikrofon STT dibuka.
+        time.sleep(0.20)
+    except Exception as e:
+        logger.debug(f"[AUDIO] Mic cue error: {e}")
+

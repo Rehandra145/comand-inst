@@ -38,9 +38,9 @@ recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
     decoding_method="greedy_search",
     provider="cpu",
     enable_endpoint_detection=True,
-    rule1_min_trailing_silence=2.4,
-    rule2_min_trailing_silence=1.2,
-    rule3_min_utterance_length=20.0,
+    rule1_min_trailing_silence=2.8,
+    rule2_min_trailing_silence=2.2,
+    rule3_min_utterance_length=30.0,
 )
 
 

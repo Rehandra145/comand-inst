@@ -101,7 +101,7 @@ class ResourceScheduler:
     Mencegah race condition antar-consumer audio dan mengeliminasi echo ruangan.
     """
 
-    def __init__(self, settling_delay_ms: int = 150):
+    def __init__(self, settling_delay_ms: int = 400):
         self._lock = threading.RLock()
         self._current_stage = AudioStage.IDLE
         self._settling_delay_sec = settling_delay_ms / 1000.0

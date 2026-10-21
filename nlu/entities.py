@@ -128,6 +128,87 @@ PERSONS = [
 # ARAH / DIRECTION
 # =========================
 
+# =========================
+# OBJEK / BARANG YANG BISA DIANTAR
+# =========================
+
+OBJECTS = [
+    # Obat & Farmasi
+    "obat",
+    "obat ini",
+    "obat-obatan",
+    "resep",
+    "resep obat",
+    "infus",
+
+    # Makanan & Minuman
+    "makanan",
+    "makanan ini",
+    "makanan pasien",
+    "minuman",
+    "nampan makanan",
+    "nampan",
+    "baki makanan",
+    "baki",
+
+    # Sampel & Laboratorium
+    "sampel darah",
+    "sampel",
+    "sampel urin",
+    "sampel lab",
+    "darah",
+    "hasil lab",
+    "hasil laboratorium",
+
+    # Dokumen & Rekam Medis
+    "dokumen",
+    "dokumen ini",
+    "berkas",
+    "berkas ini",
+    "rekam medis",
+    "rekam medis pasien",
+    "surat",
+    "surat rujukan",
+    "hasil rontgen",
+    "hasil pemeriksaan",
+    "laporan",
+
+    # Peralatan Medis
+    "alat medis",
+    "peralatan",
+    "peralatan medis",
+    "tabung oksigen",
+    "oksigen",
+    "kursi roda",
+    "tandu",
+    "brankar",
+    "stetoskop",
+    "tensimeter",
+
+    # Barang Umum
+    "barang",
+    "barang ini",
+    "paket",
+    "paket ini",
+    "bungkusan",
+    "bungkusan ini",
+    "tas",
+    "box",
+    "kotak",
+    "kotak ini",
+    "kantong",
+    "kantong ini",
+    "selimut",
+    "bantal",
+    "linen",
+    "sprei",
+]
+
+
+# =========================
+# ARAH / DIRECTION
+# =========================
+
 DIRECTION_MAP = {
     "maju": "forward",
     "ke depan": "forward",

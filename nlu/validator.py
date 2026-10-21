@@ -26,17 +26,25 @@ REQUIRED_SLOTS: Dict[str, Tuple[str, ...]] = {
     "GO_BACK": _EMPTY_TUPLE,
     "WAIT": _EMPTY_TUPLE,
     "FOLLOW": _EMPTY_TUPLE,
+    "EMERGENCY": _EMPTY_TUPLE,
+    "STATUS": _EMPTY_TUPLE,
+    "GREETING": _EMPTY_TUPLE,
+    "THANK": _EMPTY_TUPLE,
     "UNKNOWN": _EMPTY_TUPLE,
 }
 
 # Optional slots per intent (for reference)
 OPTIONAL_SLOTS: Dict[str, Tuple[str, ...]] = {
-    "NAVIGATE": _EMPTY_TUPLE,
+    "NAVIGATE": ("object",),
     "MOVE": ("distance", "unit"),
     "STOP": _EMPTY_TUPLE,
     "GO_BACK": ("location",),
     "WAIT": ("duration",),
     "FOLLOW": ("person",),
+    "EMERGENCY": ("location",),
+    "STATUS": _EMPTY_TUPLE,
+    "GREETING": _EMPTY_TUPLE,
+    "THANK": _EMPTY_TUPLE,
     "UNKNOWN": _EMPTY_TUPLE,
 }
 

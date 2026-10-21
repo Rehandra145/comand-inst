@@ -19,6 +19,7 @@ from nlu.entities import (
     PERSONS,
     DIRECTION_MAP,
     NUMBER_WORDS,
+    OBJECTS,
 )
 from nlu.room_validator import VALID_ROOMS
 
@@ -114,6 +115,14 @@ _SORTED_PERSONS: Tuple[str, ...] = tuple(
 # Original person names for output (maintain casing)
 _PERSON_ORIGINALS = {p.lower(): p for p in PERSONS}
 
+# Pre-sorted objects (longest first) — computed once
+_SORTED_OBJECTS: Tuple[str, ...] = tuple(
+    sorted((o.lower() for o in OBJECTS), key=len, reverse=True)
+)
+
+# Original object names for output (maintain casing)
+_OBJECT_ORIGINALS = {o.lower(): o for o in OBJECTS}
+
 # Pre-compiled regex patterns (support phonetic STT errors like "ruas" / "ruan" for "ruang")
 _RE_ROOM_PREFIX = re.compile(r'\b(ruang(?:an)?|ruas|ruan)\s+(.+)')
 _RE_ROOM_DIGITS = re.compile(r'^(\d+)\b')
@@ -145,6 +154,7 @@ class RuleBasedSlotExtractor(BaseSlotExtractor):
 
         if intent == "NAVIGATE":
             slots.update(self._extract_location(text_lower))
+            slots.update(self._extract_object(text_lower))
 
         elif intent == "MOVE":
             slots.update(self._extract_direction(text_lower))
@@ -156,7 +166,10 @@ class RuleBasedSlotExtractor(BaseSlotExtractor):
         elif intent == "GO_BACK":
             slots.update(self._extract_location(text_lower))
 
-        # STOP, WAIT, UNKNOWN — no slots needed
+        elif intent == "EMERGENCY":
+            slots.update(self._extract_location(text_lower))
+
+        # STOP, WAIT, STATUS, GREETING, THANK, UNKNOWN — no slots needed
 
         return slots
 
@@ -352,5 +365,21 @@ class RuleBasedSlotExtractor(BaseSlotExtractor):
         for person_lower in _SORTED_PERSONS:
             if person_lower in text:
                 return {"person": _PERSON_ORIGINALS[person_lower]}
+
+        return {}
+
+    def _extract_object(self, text: str) -> Dict[str, str]:
+        """
+        Extract objek/barang dari text.
+        
+        Contoh:
+          "antarkan obat ini ke ruang ICU"     → {"object": "obat ini"}
+          "bawa sampel darah ke laboratorium"  → {"object": "sampel darah"}
+          "antarkan ke ruang ICU"              → {} (tidak ada objek)
+        """
+
+        for obj_lower in _SORTED_OBJECTS:
+            if obj_lower in text:
+                return {"object": _OBJECT_ORIGINALS[obj_lower]}
 
         return {}
