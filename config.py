@@ -10,10 +10,10 @@ STT_RATE = 16000
 
 
 # Jumlah CPU thread
-NUM_THREADS = 4
+NUM_THREADS = 3
 
 # Index default perangkat mikrofon (None = otomatis deteksi perangkat input aktif)
-# Bisa diisi angka ID spesifik (misal: DEFAULT_MIC_DEVICE = 2 untuk USB Mic)
+# Bisa diisi angka ID spesifik (misal: DEFAULT_MIC_DEVICE = 0 atau 2)
 DEFAULT_MIC_DEVICE = 0
 
 # Default ROS 2 TCP Socket Node Target

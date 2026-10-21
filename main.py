@@ -38,6 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from config import DEFAULT_MIC_DEVICE
+import responses
 
 try:
     from scheduler import scheduler, set_thread_high_priority
@@ -387,7 +388,9 @@ def get_confirmation_message(result: dict) -> tuple:
             elif obj:
                 return f"$ robot: mengantarkan {obj}", f"Baik, akan saya antarkan {obj}."
             elif loc:
-                return f"$ robot: menuju {loc}", f"Baik, ikuti saya ke {loc}."
+                return f"$ robot: menuju {loc}", responses.navigate_confirm(loc)
+            else:
+                return "$ robot: menuju lokasi", "Baik, saya akan menuju ke lokasi."
         elif intent == "MOVE":
             direction = slots.get("direction", "?")
             distance = slots.get("distance", "")
@@ -423,6 +426,9 @@ def get_confirmation_message(result: dict) -> tuple:
     elif vstatus == "INVALID_LOCATION":
         loc = slots.get('location', '?')
         return f'$ robot: lokasi "{loc}" tidak ditemukan', f"Maaf, lokasi {loc} tidak terdaftar di sistem."
+    elif vstatus == "UNKNOWN_INTENT":
+        msg = responses.unknown_intent()
+        return f"$ robot: {msg.lower()}", msg
     else:
         return "$ robot: stand by", "Perintah diproses."
 
@@ -441,7 +447,17 @@ def listen_microphone_cli(duration: int = 5, device: int = None, prompt: str = "
     import sounddevice as sd
     import numpy as np
     import threading
-    from stt import recognizer, create_stream
+    import stt as _stt
+
+    if not _stt.is_ready():
+        sys.stdout.write("   [STT] Menyiapkan model STT, mohon tunggu...")
+        sys.stdout.flush()
+        _t0 = time.time()
+        _stt.get_recognizer()
+        sys.stdout.write(f"\r   [STT] Model siap ({time.time() - _t0:.1f}s).            \n")
+        sys.stdout.flush()
+    recognizer = _stt.get_recognizer()
+    create_stream = _stt.create_stream
 
     capture_rate = get_supported_sample_rate(device)
     channels = get_optimal_channels(device, capture_rate)
@@ -577,9 +593,12 @@ def run_task_cli(duration: int = 5, device: int = None, ros2_host: str = None, r
     - Audio caching: kalimat umum di-sintesis dengan 0 ms latency
     - Task pinning & scheduling priority diterapkan otomatis
     """
+    from stt import preload_async as stt_preload_async
     from nlu.pipeline import NLUPipeline
     from tts import speak_and_wait, is_tts_available, warmup_async
 
+    # Load model STT di background selagi greeting TTS diputar
+    stt_preload_async()
     warmup_async()
     pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
     tts_ok = is_tts_available()
@@ -598,7 +617,7 @@ def run_task_cli(duration: int = 5, device: int = None, ros2_host: str = None, r
 
     try:
         # === STEP 1: Greeting TTS ===
-        greeting = "Halo, ada yang bisa saya bantu hari ini?"
+        greeting = responses.greeting()
         print(f"\n{MAGENTA}[🤖 ROBOT]{RESET} \"{greeting}\"")
         if tts_ok:
             speak_and_wait(greeting)
@@ -634,7 +653,7 @@ def run_task_cli(duration: int = 5, device: int = None, ros2_host: str = None, r
         if result["status"] == "INCOMPLETE" and result.get("missing_slots"):
             missing = result["missing_slots"]
             if "location" in missing:
-                clarify_question = "Ke ruangan berapa?"
+                clarify_question = responses.ask_location()
             elif "direction" in missing:
                 clarify_question = "Ke arah mana?"
             elif "person" in missing:
@@ -722,9 +741,12 @@ def run_task_cli(duration: int = 5, device: int = None, ros2_host: str = None, r
 
 def run_cli_interactive(duration: int = 5, device: int = None, ros2_host: str = None, ros2_port: int = None):
     """Menu CLI interaktif untuk terminal headless / Ubuntu Server."""
+    from stt import preload_async as stt_preload_async
     from nlu.pipeline import NLUPipeline
     from tts import warmup_async
 
+    # Load model STT di background selagi menu ditampilkan (agar siap saat mode dipilih)
+    stt_preload_async()
     # Prewarm audio cache & engine di background
     warmup_async()
     pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
@@ -809,7 +831,10 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
     import threading
     import queue as _queue
 
-    from stt import recognizer, create_stream
+    # `recognizer` adalah proxy lazy: import instan, model dimuat di background
+    from stt import recognizer, create_stream, preload_async as stt_preload_async
+    from stt import is_ready as stt_is_ready
+    stt_preload_async()
     from nlu.pipeline import NLUPipeline
     from nlu.ros2_adapter import save_ros2_config, SocketROS2Adapter
 
@@ -1023,6 +1048,20 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
         stage_title: str = "MENDENGARKAN PERINTAH",
         context_hint: str = "Silakan berbicara langsung ke mikrofon...",
     ) -> str:
+        """
+        Rekam audio dan transkripsi secara non-streaming (blocking).
+        Mengembalikan teks hasil STT.
+
+        Arsitektur non-streaming menghindari race condition:
+        - Tidak ada concurrent consumer audio output
+        - TTS selesai dulu → baru STT mulai merekam
+        - STT selesai dulu → baru proses NLU
+        """
+        if not stt_is_ready():
+            ui_call(lambda: status_label.config(text="● Menyiapkan model STT...", fg=COLOR_AMBER))
+            ui_call(lambda: stt_label.config(text="(menyiapkan model...)", fg=COLOR_AMBER))
+            create_stream()
+            ui_call(lambda: stt_label.config(text="(mendengarkan...)", fg=COLOR_SKY))
         stream = create_stream()
         audio_q = _queue.Queue()
         local_stop = threading.Event()
@@ -1335,7 +1374,7 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
 
         try:
             # === STEP 1: Greeting TTS ===
-            greeting = "Halo, ada yang bisa saya bantu hari ini?"
+            greeting = responses.greeting()
             set_user_ui_state("(＾▽＾)", "Robot menyapa Anda...", greeting, COLOR_PURPLE)
             ui_call(lambda: status_label.config(text="● Robot menyapa...", fg=COLOR_AMBER))
             ui_call(lambda: status_badge.config(
@@ -1417,7 +1456,7 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
                 logger.info(f"[TASK] Slot belum lengkap: {missing}")
 
                 if "location" in missing:
-                    clarify_question = "Ke ruangan berapa?"
+                    clarify_question = responses.ask_location()
                 elif "direction" in missing:
                     clarify_question = "Ke arah mana?"
                 elif "person" in missing:
@@ -1540,7 +1579,10 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
                     confirm_msg = f"Baik, akan saya antarkan {obj}."
                 elif loc:
                     rtext = f"Robot: Menuju {loc}"
-                    confirm_msg = f"Baik, ikuti saya ke {loc}."
+                    confirm_msg = responses.navigate_confirm(loc)
+                else:
+                    rtext = "Robot: Menuju lokasi"
+                    confirm_msg = "Baik, saya akan menuju ke lokasi."
                 set_user_ui_state("(★‿★)", f"Mengantar ke {loc or 'tujuan'}...", confirm_msg, COLOR_GREEN)
             elif intent == "MOVE":
                 direction = slots.get("direction", "?")
@@ -1605,6 +1647,11 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
             rtext = f'Robot: Ruangan "{loc}" tidak ditemukan'
             confirm_msg = f"Maaf, lokasi {loc} tidak ditemukan."
             set_user_ui_state("(×_×)", "Lokasi Tidak Ditemukan", confirm_msg, COLOR_RED)
+        elif vstatus == "UNKNOWN_INTENT":
+            rcolor = COLOR_RED
+            confirm_msg = responses.unknown_intent()
+            rtext = f"Robot: {confirm_msg}"
+            set_user_ui_state("(•_•)", "Perintah Tidak Dikenali", confirm_msg, COLOR_RED)
         else:
             rcolor = COLOR_RED
             rtext = "Robot: Perintah tidak dikenali"
@@ -1822,6 +1869,9 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
         nonlocal is_recording
 
         stop_event.clear()
+        if not stt_is_ready():
+            ui_call(lambda: status_label.config(text="> status: menyiapkan model STT...", fg=YELLOW))
+            ui_call(lambda: stt_label.config(text="$ stt: (menyiapkan model...)", fg=YELLOW))
         stream = create_stream()
         audio_q = _queue.Queue()
 
@@ -1983,6 +2033,9 @@ def run_gui_mode(duration: int = 5, device: int = None, ros2_host: str = None, r
             elif vstatus == "INVALID_LOCATION":
                 rcolor = COLOR_RED
                 rtext = f'Robot: Ruangan "{result["slots"].get("location", "?")}" tidak ditemukan'
+            elif vstatus == "UNKNOWN_INTENT":
+                rcolor = COLOR_RED
+                rtext = f"Robot: {responses.unknown_intent()}"
             else:
                 rcolor = COLOR_RED
                 rtext = "Robot: Perintah tidak dikenali"
@@ -3619,6 +3672,8 @@ if __name__ == "__main__":
 
     # 4. Direct terminal mic mode
     if args.mic:
+        from stt import preload_async as stt_preload_async
+        stt_preload_async()
         from nlu.pipeline import NLUPipeline
         pipeline = NLUPipeline(ros2_host=args.ros2_host, ros2_port=args.ros2_port)
         record_and_process_cli(pipeline, duration=args.duration, device=args.device)
