@@ -25,11 +25,8 @@ import numpy as np
 try:
     from audio.scheduler import scheduler, set_thread_high_priority
 except ImportError:
-    try:
-        from scheduler import scheduler, set_thread_high_priority
-    except ImportError:
-        scheduler = None
-        set_thread_high_priority = lambda: None
+    scheduler = None
+    set_thread_high_priority = lambda: None
 
 logger = logging.getLogger(__name__)
 

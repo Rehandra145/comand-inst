@@ -621,7 +621,7 @@ class RobotGUIApp:
     def interactive_task_flow(self):
         """Alur percakapan interaktif dua arah (sequential TTS ↔ STT)."""
         try:
-            from tts import speak_and_wait, is_tts_available
+            from audio.tts import speak_and_wait, is_tts_available
         except ImportError:
             logger.error("[TASK] Module tts.py tidak ditemukan")
             self.ui_call(lambda: self.admin_view.status_label.config(text="● Modul TTS tidak ditemukan", fg=COLOR_RED))
@@ -662,7 +662,7 @@ class RobotGUIApp:
                 return
 
             try:
-                from tts import play_mic_cue
+                from audio.tts import play_mic_cue
                 play_mic_cue()
             except Exception:
                 pass
@@ -747,7 +747,7 @@ class RobotGUIApp:
                     return
 
                 try:
-                    from tts import play_mic_cue
+                    from audio.tts import play_mic_cue
                     play_mic_cue()
                 except Exception:
                     pass
@@ -964,7 +964,7 @@ class RobotGUIApp:
 
             if tts_ok:
                 try:
-                    from tts import speak_and_wait
+                    from audio.tts import speak_and_wait
                     speak_and_wait(ask_confirm)
                 except Exception:
                     pass
@@ -980,7 +980,7 @@ class RobotGUIApp:
                 return
 
             try:
-                from tts import play_mic_cue
+                from audio.tts import play_mic_cue
                 play_mic_cue()
             except Exception:
                 pass
@@ -1025,7 +1025,7 @@ class RobotGUIApp:
                 self.set_user_ui_state("(•_•)", "Tugas Dibatalkan", f'Anda mengatakan: "{user_spoken}". Robot kembali siaga.', COLOR_RED)
                 if tts_ok:
                     try:
-                        from tts import speak_and_wait
+                        from audio.tts import speak_and_wait
                         speak_and_wait(cancel_msg)
                     except Exception:
                         pass
@@ -1039,7 +1039,7 @@ class RobotGUIApp:
         # TTS konfirmasi akhir
         if tts_ok and confirm_msg:
             try:
-                from tts import speak_and_wait
+                from audio.tts import speak_and_wait
                 speak_and_wait(confirm_msg)
             except Exception as e:
                 logger.error(f"[TTS] Gagal konfirmasi: {e}")
@@ -1056,7 +1056,7 @@ class RobotGUIApp:
             self.set_user_ui_state("(◕‿◕)✓", f"Tiba di {target_loc}!", arrival_msg, COLOR_GREEN)
             if tts_ok:
                 try:
-                    from tts import speak_and_wait
+                    from audio.tts import speak_and_wait
                     speak_and_wait(arrival_msg)
                 except Exception:
                     pass
@@ -1370,7 +1370,7 @@ class RobotGUIApp:
         def _worker():
             res = self.pipeline.process(cmd)
             try:
-                from tts import is_tts_available
+                from audio.tts import is_tts_available
                 tts_ok = is_tts_available()
             except Exception:
                 tts_ok = False
@@ -1385,7 +1385,7 @@ class RobotGUIApp:
         def _worker():
             res = self.pipeline.process(action_cmd)
             try:
-                from tts import is_tts_available
+                from audio.tts import is_tts_available
                 tts_ok = is_tts_available()
             except Exception:
                 tts_ok = False
@@ -1399,7 +1399,7 @@ class RobotGUIApp:
         def _worker():
             res = self.pipeline.process(txt)
             try:
-                from tts import is_tts_available
+                from audio.tts import is_tts_available
                 tts_ok = is_tts_available()
             except Exception:
                 tts_ok = False
@@ -1415,7 +1415,7 @@ class RobotGUIApp:
         def _worker():
             res = self.pipeline.process(txt)
             try:
-                from tts import is_tts_available
+                from audio.tts import is_tts_available
                 tts_ok = is_tts_available()
             except Exception:
                 tts_ok = False

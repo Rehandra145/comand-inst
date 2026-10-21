@@ -95,7 +95,7 @@ def listen_microphone_cli(duration: int = 5, device: Optional[int] = None, promp
     """
     device = get_effective_input_device(device)
     import sounddevice as sd
-    import stt as _stt
+    import audio.stt as _stt
 
     if not _stt.is_ready():
         sys.stdout.write("   [STT] Menyiapkan model STT, mohon tunggu...")
