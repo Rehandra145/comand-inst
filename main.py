@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # =========================
 # MODULAR IMPORTS & RE-EXPORTS
 # =========================
-from audio_utils import (
+from audio import (
     get_effective_input_device,
     get_supported_sample_rate,
     get_optimal_channels,
@@ -53,12 +53,12 @@ from audio_utils import (
     list_audio_devices,
     test_mic_hardware,
 )
-from dialog_utils import (
+from nlu.dialog import (
     translate_slot_names,
     merge_dialog_context,
     get_confirmation_message,
 )
-from cli_runner import (
+from cli import (
     print_result_box,
     listen_microphone_cli,
     record_and_process_cli,
@@ -174,7 +174,7 @@ if __name__ == "__main__":
 
     # 4. Direct terminal mic mode
     if args.mic:
-        from stt import preload_async as stt_preload_async
+        from audio.stt import preload_async as stt_preload_async
         stt_preload_async()
         from nlu.pipeline import NLUPipeline
         pipeline = NLUPipeline(ros2_host=args.ros2_host, ros2_port=args.ros2_port)

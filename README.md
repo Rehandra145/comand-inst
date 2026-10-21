@@ -358,64 +358,107 @@ sequenceDiagram
 - **Task Pinning (CPU Core Affinity)**: Tersedia fungsi `pin_current_thread_to_cores()` menggunakan native Linux `os.sched_setaffinity` (ideal untuk 4-Core Cortex-A72 pada Raspberry Pi 4) atau `SetThreadAffinityMask` pada Windows.
 - **Audio Mutual Exclusion**: Menjamin hanya satu audio I/O stream (Speaker ATAU Mikrofon) yang mengakses driver audio pada satu waktu.
 
-### 5.3 In-Memory Audio Caching & Background Pre-Warming (`tts.py`)
+### 5.3 Multi-Level Audio Caching & Background Pre-Warming (`tts.py`, `.tts_cache/`)
 
-- **Zero-Latency In-Memory Cache**: Kalimat sistem berulang (*"Halo, ada yang bisa saya bantu hari ini?"*, *"Ke ruangan berapa?"*, *"Baik, saya berhenti."*, dll.) disimpan di memori RAM sebagai audio array float32. Waktu sintesis ONNX untuk kalimat umum berkurang dari ~60–800ms menjadi **0.001 ms (0% CPU cost)**.
-- **Background Pre-Warming (`warmup_async()`)**: Engine Sherpa-ONNX Piper VITS dan cache kalimat umum diinisialisasi pada background daemon thread saat aplikasi pertama kali dijalankan. Pengguna merasakan responsivitas instan tanpa *cold-start delay* saat menekan tombol atau menjalankan perintah tugas.
+- **L1 In-Memory Audio Cache**: Kalimat berulang disimpan di memori RAM sebagai array `float32`. Sintesis ONNX untuk kalimat umum berkurang menjadi **0.001 ms (0% CPU cost)**.
+- **L2 Persistent Disk Cache**: Audio terkompresi disimpan ke folder `.tts_cache/` sehingga cache tetap tersedia antar-restart tanpa sintesis ulang.
+- **Background Pre-Warming (`warmup_async()`)**: Engine Sherpa-ONNX Piper VITS diinisialisasi pada background thread saat aplikasi start agar responsivitas langsung instan tanpa *cold-start delay*.
+- **Mic Cue Chime & Acoustic Settling Delay**: Nada santun dua-nada (*dual-tone harmonic chime*) dimainkan sesaat sebelum mikrofon aktif dengan *hanning smoothing window* dan jeda akustik 200 ms agar gema speaker hilang tuntas sebelum STT mulai mendengarkan.
 
-### 5.4 Penggabungan Konteks Dialog Multi-Turn (`merge_dialog_context`)
+### 5.4 Pre-Optimized ONNX Encoder & Lazy STT Loading (`stt.py`)
 
-Fungsi penggabung konteks menangani variasi jawaban pengguna:
+- **Lazy Loading (`_LazyRecognizer`)**: Mengimpor modul STT tidak lagi memblokir eksekusi startup program (instan 0 detik).
+- **Background Preloading (`preload_async()`)**: Model STT dimuat di background thread saat menu atau sapaan awal berjalan.
+- **INT8 Quantization Awareness**: Model INT8 (`.int8.onnx`) yang telah terkuantisasi digunakan langsung secara optimal tanpa memaksakan sesi optimasi ONNX Runtime CPU eksternal yang tidak kompatibel.
+
+### 5.5 Penggabungan Konteks Dialog Multi-Turn (`nlu/dialog.py`)
+
+Fungsi penggabung konteks menangani variasi jawaban klarifikasi pengguna:
 - **Digit Normalization**: Jawaban murni angka seperti `"204"` otomatis dipetakan menjadi `"ruang 204"`.
-- **Preposition Guard**: Jawaban yang sudah diawali preposisi (`"ke ruang 204"`) tidak akan menghasilkan duplikasi kata depan (*"antarkan obat ini ke ke ruang 204"* dicegah).
+- **Preposition Guard**: Jawaban yang sudah diawali preposisi (`"ke ruang 204"`) dicegah dari duplikasi kata depan (*"antarkan obat ini ke ke ruang 204"* dicegah).
 - **Slot Routing**: Jawaban arah (`"kanan"` $\rightarrow$ `"ke kanan"`) dan orang (`"dokter budi"` $\rightarrow$ `"ikuti dokter budi"`) digabungkan sesuai semantik masing-masing intent.
+
+### 5.6 Variasi Respons Alami Robot (`responses.py`)
+
+Menghindari kalimat robot yang kaku dan monoton dengan variasi template sapaan awal (`greeting()`), konfirmasi navigasi (`navigate_confirm()`), pertanyaan lokasi (`ask_location()`), dan *fallback* perintah tak dikenali (`unknown_intent()`).
 
 ---
 
 ## 6. Desain GUI & Mode Operasi
 
-Antarmuka GUI dibangun menggunakan **Tkinter** dengan konsep **Matte Charcoal Theme**:
+Antarmuka GUI dibangun menggunakan **Tkinter** dengan arsitektur **Modern Dual-View Kiosk (Matte Charcoal Theme)** yang dirancang ramah pengguna dan sangat responsif.
 
-- **Palet Warna**:
-  - Background Utama: `#18191c` (*deep matte charcoal*)
-  - Terminal Panel Card: `#202226` (*elevated dark card*)
-  - Separator & Borders: `#2f3238` (*subtle charcoal divider*)
-  - Aksen Status: Emerald Green (`#45d686`), Sky Cyan (`#38bdf8`), Amber Yellow (`#fbbf24`), Coral Red (`#f87171`), Mode Orange (`#fb923c`)
-- **Dua Mode Interaksi Utama**:
-  1. **`[ TALK ]` (Streaming STT)**: Cocok untuk pengujian cepat 1-turn perintah langsung.
-  2. **`[ TUGAS ]` (Interactive Multi-Turn)**: Mode dialog interaktif berurutan dengan suara TTS, pengisian slot otomatis, dan log percakapan visual.
-- **Mutual Exclusion Tombol**: Menekan salah satu mode otomatis mengunci (*disable*) mode lainnya untuk mencegah perebutan resource mikrofon/speaker. Tombol `[ BATALKAN ]` tersedia untuk menghentikan alur tugas kapan saja.
+### 6.1 Mode Pengguna (End-User Kiosk Layanan Mandiri)
+Dirancang khusus untuk pasien dan pengunjung rumah sakit:
+- **Persona Hero Card**: Menampilkan ekspresi wajah avatar ASCII dinamis (`(◕‿◕)`, `(👂‿👂)`, `(★‿★)`, `(＾▽＾)`, `(×_×)`) sesuai status interaksi robot.
+- **Giant Touch Voice Button**: Tombol sentuh sentral 1-ketukan untuk berbicara (*"SENTUH UNTUK BERBICARA"*). Dilengkapi indikator teks real-time yang langsung memperbarui tampilan tombol begitu ucapan pengguna mulai terdeteksi oleh mikrofon.
+- **Pilihan Tujuan Cepat (Instant Tiles)**: Ubin 1-sentuh ke tujuan favorit (Ruang ICU, Ruang IGD, Farmasi/Apotek, Poli Jantung, Poli Anak, Lobi Utama, Berhenti, Kembali ke Pos).
+- **Switch Opsi Tugas**:
+  - **🧭 Penunjuk Arah**: Robot memandu dan mengantar pengguna langsung ke lokasi tujuan.
+  - **💊 Antar Obat**: Robot membawa dan mengantarkan suplai obat medis ke ruangan tujuan.
+- **Konfirmasi Suara 2-Arah Natural**: Pada pengantaran penting, robot mengonfirmasi dengan suara (*"Saya akan mengantarkan obat ke ruang ICU. Apakah sudah benar?"*). Panduan `(Ucapkan 'benar' untuk lanjut, 'tidak' untuk batal)` ditampilkan secara visual di layar tanpa dibacakan TTS agar tidak bising dan ringkas.
+- **Balon Percakapan Real-Time**: Feed chat bersih yang mencatat percakapan antara pengguna dan robot secara kronologis.
+- **Input Pencarian Sentuh**: Kolom ketik sentuh dengan tombol *Kirim* untuk pengguna yang lebih memilih interaksi teks.
+
+### 6.2 Mode Teknisi (Control Center / Dashboard)
+Dirancang untuk teknisi, administrator, dan integrasi robotik:
+- **Telemetri NLU Real-Time**: Menampilkan live transkripsi STT, Intent terdeteksi beserta confidence score, parameter slots, dan status validasi.
+- **Monitor Transmisi Payload Node ROS 2**: Indikator visual real-time status pengiriman JSON payload ke Socket TCP ROS 2 (`● TERKIRIM ✓`, `✕ GAGAL KIRIM`, `⏸ DITAHAN`).
+- **Modal Konfigurasi Endpoint ROS 2**: Pengaturan Custom IP & Port target robot dengan tombol preset cepat (*Robot 10.107.245.221* dan *Localhost 127.0.0.1*) serta fitur **Uji Ping TCP** interaktif sebelum disimpan ke `ros2_config.json`.
+- **Diagnostik Mikrofon**: Modal pemilih hardware mikrofon audio dan penguji level volume audio (RMS & Peak amplitude).
+- **Console Log Percakapan**: Riwayat debug lengkap seluruh event sistem audio, NLU, dan komunikasi socket.
 
 ---
 
 ## 7. Struktur Direktori Proyek
 
+Proyek ini telah direfaktor secara penuh ke dalam arsitektur modular per-domain yang bersih:
+
 ```text
 command-inst/
-├── config.py              # Konfigurasi model STT, sample rate, & jumlah thread CPU
-├── main.py                # Titik masuk utama: GUI Tkinter, CLI Tugas, Streaming STT
-├── stt.py                 # Engine STT Sherpa-ONNX streaming-native (in-memory)
-├── tts.py                 # Engine TTS offline (Piper VITS), audio cache, & warmup
-├── scheduler.py           # Resource scheduler, task pinning, thread priority, mutual exclusion
-├── download_model.py      # Script downloader & verifikasi model STT & TTS bahasa Indonesia
-├── model/
-│   ├── ...                # Model ONNX RNN-T (encoder, decoder, joiner, tokens)
-│   └── tts/               # Model ONNX Piper VITS (id_ID-news_tts-medium.onnx, tokens, data)
-├── nlu/
-│   ├── command_builder.py # Penggabung intent dan slots menjadi JSON terstruktur
-│   ├── entities.py        # Master data nama ruangan, poli, arah, dan personil RS
-│   ├── intent_classifier.py# Pengklasifikasi intent (Keyword Fast-Path + Fuzzy Fallback)
-│   ├── pipeline.py        # Orkestrasi alur kerja NLU modular end-to-end
-│   ├── room_validator.py  # Layer validasi keberadaan ruangan (O(1) Set Lookup)
-│   ├── ros2_adapter.py    # Interface adapter ROS 2 dan Mock implementation
-│   ├── slot_extractor.py  # Ekstraktor slot (FSM parser C++ + Fuzzy pattern matcher)
-│   └── valid_rooms.json   # Basis data konfigurasi 70+ nama ruangan valid
-├── tests/
-│   └── test_nlu.py        # Unit & E2E Test Suite (99 test cases)
-├── quantize_model.py      # Script quantisasi model ONNX ke INT8 untuk Raspberry Pi
-├── pyproject.toml         # Konfigurasi dependensi project (uv / pip)
-├── requirements.txt       # Requirements pip standar
-└── README.md              # Dokumentasi teknis & panduan lengkap
+├── main.py                     # Entry point utama aplikasi (< 170 baris)
+├── config.py                   # Konfigurasi global (model path, sample rate, threads, mic)
+├── responses.py                # Variasi template respons dialog robot
+├── download_model.py           # Script pengunduh & verifikasi model offline STT & TTS
+├── quantize_model.py           # Script optimasi kuantisasi model ONNX INT8
+│
+├── audio/                      # Audio & Speech Processing Layer
+│   ├── __init__.py             # Ekspor utilitas audio
+│   ├── stt.py                  # Engine STT Sherpa-ONNX streaming Zipformer RNN-T
+│   ├── tts.py                  # Engine TTS offline Piper VITS, 2-level disk cache, chime cue
+│   ├── scheduler.py            # Hardware scheduling, thread priority, & mutual exclusion
+│   └── utils.py                # Deteksi hardware mic, query rate/channel, resampling DSP
+│
+├── nlu/                        # Natural Language Understanding Layer
+│   ├── __init__.py             # Inisialisasi package NLU
+│   ├── intent_classifier.py    # Klasifikasi intent (Keyword Fast-Path + Ratcliff-Obershelp)
+│   ├── slot_extractor.py       # Ekstraksi slot (C++ Grammar FSM + Fuzzy Entity Matcher)
+│   ├── room_validator.py       # Layer validasi ruangan (O(1) Hash Set Lookup)
+│   ├── command_builder.py      # Pembentuk structured JSON payload
+│   ├── pipeline.py             # Orkestrasi alur kerja NLU modular end-to-end
+│   ├── dialog.py               # Penggabungan konteks multi-turn & format pesan konfirmasi
+│   ├── ros2_adapter.py         # Socket TCP adapter transmisi payload ke Node ROS 2
+│   ├── entities.py             # Kamus entitas ruangan, arah, dan personil rumah sakit
+│   └── valid_rooms.json        # Basis data 74 nama ruangan terdaftar
+│
+├── gui/                        # Graphical User Interface (Dual-View Tkinter)
+│   ├── __init__.py             # Ekspor run_gui_mode dan RobotGUIApp
+│   ├── app.py                  # Controller utama GUI, event loop, & background threads
+│   ├── theme.py                # Design tokens: palet warna, tipografi font, hover effects
+│   ├── modals.py               # Dialog modal pemilihan mic & konfigurasi IP/Port ROS 2
+│   ├── user_view.py            # View Mode Pengguna (Kiosk layanan mandiri pasien)
+│   └── admin_view.py           # View Mode Teknisi (telemetri NLU & monitor ROS 2)
+│
+├── cli/                        # Command Line Interface Layer
+│   ├── __init__.py             # Ekspor fungsi-fungsi CLI runner
+│   └── runner.py               # Runner tugas dialog terminal, streaming CLI, & diagnostik
+│
+├── tests/                      # Test Suite & Otomasi Verifikasi
+│   └── test_nlu.py             # 121 Unit & End-to-End Test Cases
+│
+├── pyproject.toml              # Konfigurasi dependensi project (uv / pip)
+├── requirements.txt            # Requirements pip standar
+└── README.md                   # Dokumentasi teknis & panduan lengkap
 ```
 
 ---
@@ -462,20 +505,30 @@ python download_model.py
 
 ### Menjalankan Program
 
-#### 1. Mode Tugas Dialog Interaktif (Terminal CLI):
-Jalankan alur dialog sekuensial langsung dari terminal (TTS menyapa $\rightarrow$ rekam perintah $\rightarrow$ tanya klarifikasi slot jika kurang $\rightarrow$ TTS konfirmasi):
+#### 1. Mode GUI Tkinter Desktop (Default):
+```bash
+uv run python main.py
+# atau paksa mode GUI:
+uv run python main.py --gui
+```
+- Menjalankan antarmuka Kiosk Mode Pengguna secara default.
+- Sentuh tombol **`[ 🛠️ Mode Teknisi ]`** di kanan atas untuk beralih ke dashboard kontrol teknisi.
+- Sentuh tombol **`[ 🎙️ SENTUH UNTUK BERBICARA ]`** untuk memulai interaksi suara natural.
+- Pilih salah satu **Ubin Tujuan Cepat** untuk navigasi sekali sentuh.
+
+#### 2. Mode Tugas Dialog Interaktif (Terminal CLI):
+Jalankan alur dialog sekuensial langsung dari terminal (TTS menyapa $\rightarrow$ rekam perintah $\rightarrow$ tanya klarifikasi slot jika kurang $\rightarrow$ konfirmasi dua arah $\rightarrow$ kirim ke ROS 2):
 ```bash
 uv run python main.py --task
 # atau alias:
 uv run python main.py --tugas
 ```
 
-#### 2. Mode Menu CLI Interaktif (Terminal Headless / Ubuntu Server):
+#### 3. Mode Menu CLI Interaktif (Terminal Headless / Ubuntu Server):
 Jika dijalankan di Ubuntu Server tanpa monitor/X11, program akan otomatis membuka menu terminal interaktif:
 ```bash
 uv run python main.py --cli
 ```
-
 Pilihan menu yang tersedia:
 - `[1]` Mode Tugas Dialog Interaktif (TTS ↔ STT Sequential)
 - `[2]` Bicara Langsung via Mikrofon (Streaming STT + NLU)
@@ -484,17 +537,13 @@ Pilihan menu yang tersedia:
 - `[5]` Tes Diagnosa & Level Volume Mikrofon
 - `[q]` Keluar
 
-#### 3. Mode GUI Tkinter (Desktop):
+#### 4. Kustomisasi IP & Port ROS 2 via Argumen:
 ```bash
-uv run python main.py
-# atau:
-uv run python main.py --gui
+# Menentukan host & port custom socket node ROS 2:
+python main.py --ros2-host 192.168.1.120 --ros2-port 5000
 ```
-- Tekan **`[ TALK ]`** untuk merekam suara secara live streaming STT.
-- Tekan **`[ TUGAS ]`** untuk memulai dialog tugas interaktif dengan suara offline TTS dan penanganan slot otomatis.
-- Tekan **`[ BATALKAN ]`** kapan saja untuk membatalkan dialog tugas.
 
-#### 4. Mode Mikrofon Langsung 1-Kali (Streaming Terminal):
+#### 5. Mode Mikrofon Langsung 1-Kali (Streaming Terminal):
 ```bash
 # Rekam suara langsung selama 5 detik:
 python main.py --mic
@@ -502,11 +551,11 @@ python main.py --mic
 # Rekam dengan durasi kustom (misal 7 detik):
 python main.py --mic --duration 7
 
-# Pilih ID mikrofon tertentu (cek ID dengan --list-devices):
+# Pilih ID mikrofon tertentu:
 python main.py --mic --device 1
 ```
 
-#### 5. Cek & Diagnosa Driver Mikrofon:
+#### 6. Cek & Diagnosa Driver Mikrofon:
 ```bash
 # Lihat daftar seluruh input mikrofon yang terdeteksi
 python main.py --list-devices
@@ -515,7 +564,7 @@ python main.py --list-devices
 python main.py --test-mic
 ```
 
-#### 6. Mode Teks Langsung (Tanpa Mikrofon, untuk Pengujian Cepat NLU):
+#### 7. Mode Teks Langsung (Tanpa Mikrofon, untuk Pengujian Cepat NLU):
 ```bash
 # Perintah navigasi ruangan bernomor (digit mode)
 python main.py --text "antar ke ruang satu nol empat"
@@ -523,8 +572,8 @@ python main.py --text "antar ke ruang satu nol empat"
 # Perintah navigasi ruangan bertingkat (compound mode)
 python main.py --text "bawa ke ruang tiga ratus satu"
 
-# Perintah ruangan dengan nama bunga / baru
-python main.py --text "tolong antar ke ruang melati"
+# Perintah pengantaran obat ke ruangan
+python main.py --text "tolong antarkan obat batuk ke ruang ICU"
 
 # Perintah dengan typo fonetik STT
 python main.py --text "BAHWA KE UGD"
@@ -540,7 +589,7 @@ python main.py --text "berhenti sekarang"
 
 ## 9. Pengujian & Verifikasi
 
-Proyek ini dilengkapi test suite komprehensif yang mencakup pengujian intent, slot extraction, validasi kelengkapan, validasi ruangan, hingga skenario typo fonetik STT.
+Proyek ini dilengkapi test suite komprehensif yang mencakup pengujian intent classification, slot extraction, validasi kelengkapan, validasi ruangan, parsing angka dinamis, hingga penanganan typo fonetik STT.
 
 Jalankan pengujian:
 ```bash
@@ -552,13 +601,14 @@ python tests/test_nlu.py
 ==================================================
 NLU PIPELINE TEST SUITE
 ==================================================
-  TEST: Intent Classification      -> ALL PASS
-  TEST: Slot Extraction            -> ALL PASS
-  TEST: Command Validation         -> ALL PASS
-  TEST: End-to-End Pipeline        -> ALL PASS
-  TEST: Dynamic Room Number (C++)  -> ALL PASS
-  TEST: Fuzzy Matching (STT Typos) -> ALL PASS
+  TEST: Intent Classification          -> ALL PASS
+  TEST: Slot Extraction                -> ALL PASS
+  TEST: Command Validation             -> ALL PASS
+  TEST: End-to-End Pipeline            -> ALL PASS
+  TEST: Dynamic Room Number (Grammar)  -> ALL PASS
+  TEST: Fuzzy Matching (STT Typos)     -> ALL PASS
 ==================================================
-SUMMARY: 96 passed, 0 failed
+SUMMARY: 121 passed, 0 failed
 ==================================================
 ```
+

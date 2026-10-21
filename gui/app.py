@@ -15,13 +15,13 @@ from typing import Optional
 import numpy as np
 
 import responses
-from audio_utils import (
+from audio import (
     get_effective_input_device,
     get_supported_sample_rate,
     get_optimal_channels,
     resample_to_16k,
 )
-from dialog_utils import translate_slot_names, merge_dialog_context
+from nlu.dialog import translate_slot_names, merge_dialog_context
 from gui.theme import (
     BG_BASE,
     BG_CARD,
@@ -57,7 +57,7 @@ from gui.user_view import UserView
 from gui.admin_view import AdminView
 
 try:
-    from scheduler import scheduler, set_thread_high_priority
+    from audio.scheduler import scheduler, set_thread_high_priority
 except ImportError:
     scheduler = None
     set_thread_high_priority = lambda: None
@@ -76,14 +76,14 @@ class RobotGUIApp:
         self.record_seconds = duration
 
         # Prewarm & background loaders
-        from stt import recognizer, create_stream, preload_async as stt_preload_async, is_ready as stt_is_ready
+        from audio.stt import recognizer, create_stream, preload_async as stt_preload_async, is_ready as stt_is_ready
         stt_preload_async()
         self.stt_recognizer = recognizer
         self.stt_create_stream = create_stream
         self.stt_is_ready = stt_is_ready
 
         try:
-            from tts import warmup_async
+            from audio.tts import warmup_async
             warmup_async()
         except Exception:
             pass
@@ -1526,7 +1526,7 @@ def run_gui_mode(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
     except Exception as e:
         logger.warning(f"\n[WARN] Gagal membuka GUI Tkinter (tidak ada Display Server / $DISPLAY): {e}")
         logger.info("[INFO] Beralih otomatis ke Mode CLI Interaktif (Terminal)...\n")
-        from cli_runner import run_cli_interactive
+        from cli import run_cli_interactive
         run_cli_interactive(duration=duration, device=device, ros2_host=ros2_host, ros2_port=ros2_port)
         return
 
