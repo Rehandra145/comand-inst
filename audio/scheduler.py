@@ -154,3 +154,6 @@ class ResourceScheduler:
 
 # Global singleton instance
 scheduler = ResourceScheduler()
+
+# Mutex untuk inisialisasi model ONNX runtime (Sherpa-ONNX C++ thread safety)
+model_init_lock = threading.Lock()

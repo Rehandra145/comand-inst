@@ -40,14 +40,112 @@ COLOR_PURPLE = "#a78bfa"     # Soft Lilac / Violet
 COLOR_PURPLE_BG = "#262138"
 COLOR_PURPLE_BORDER = "#6d28d9"
 
+# ============================================================================
+# LINUX X11 EMOJI / NON-BMP SANITIZER (RenderAddGlyphs Crash Fix)
+# ============================================================================
+# Pada platform Linux X11, libtk8.6 (Xft) mengalami 'BadLength' protocol error
+# dan segmentation fault / abort ketika merender karakter di luar BMP (> U+FFFF),
+# seperti color emoji. Patch transparan ini memetakan emoji umum ke label teks aman
+# dan menyaring karakter astral sebelum dikirimkan ke X server.
+import sys
+import tkinter as tk
+
+if sys.platform.startswith("linux"):
+    _EMOJI_REPLACEMENTS = {
+        "🤖": "[Robot]",
+        "🎙️": "[Mic]",
+        "🎙": "[Mic]",
+        "🛠️": "[Teknisi]",
+        "🛠": "[Teknisi]",
+        "📍": "[Lokasi]",
+        "🧭": "[Arah]",
+        "💊": "[Obat]",
+        "🏥": "[ICU]",
+        "🚨": "[IGD]",
+        "🩺": "[Poli]",
+        "👶": "[Anak]",
+        "🚪": "[Lobi]",
+        "🛑": "[Stop]",
+        "🏠": "[Pos]",
+        "🌐": "[ROS 2]",
+        "🔊": "[TTS]",
+        "⚙️": "[Config]",
+        "⚙": "[Config]",
+        "📋": "[Log]",
+        "💡": "[Tip]",
+        "✨": "[*]",
+        "⏳": "[...]",
+        "🔍": "[Cari]",
+        "💬": "[Chat]",
+        "🗑️": "[Hapus]",
+        "🗑": "[Hapus]",
+        "🔄": "[Reload]",
+    }
+
+    def _sanitize_tk_str(s):
+        if not isinstance(s, str):
+            return s
+        for k, v in _EMOJI_REPLACEMENTS.items():
+            if k in s:
+                s = s.replace(k, v)
+        s = s.replace("\ufe0f", "").replace("\ufe0e", "")
+        # Filter karakter non-BMP (> U+FFFF)
+        return "".join(ch for ch in s if ord(ch) <= 0xFFFF)
+
+    _orig_options = tk.Misc._options
+
+    def _safe_options(self, cnf, kw=None):
+        if cnf:
+            cnf = {k: _sanitize_tk_str(v) if isinstance(v, str) else v for k, v in cnf.items()}
+        if kw:
+            kw = {k: _sanitize_tk_str(v) if isinstance(v, str) else v for k, v in kw.items()}
+        return _orig_options(self, cnf, kw)
+
+    tk.Misc._options = _safe_options
+
+    _orig_text_insert = tk.Text.insert
+
+    def _safe_text_insert(self, index, chars, *args):
+        return _orig_text_insert(self, index, _sanitize_tk_str(chars), *args)
+
+    tk.Text.insert = _safe_text_insert
+
+    _orig_entry_insert = tk.Entry.insert
+
+    def _safe_entry_insert(self, index, string):
+        return _orig_entry_insert(self, index, _sanitize_tk_str(string))
+
+    tk.Entry.insert = _safe_entry_insert
+
+    _orig_wm_title = tk.Wm.wm_title
+
+    def _safe_wm_title(self, string=None):
+        if string is not None:
+            string = _sanitize_tk_str(string)
+        return _orig_wm_title(self, string)
+
+    tk.Wm.wm_title = _safe_wm_title
+
 
 def get_theme_fonts(tkfont):
-    """Deteksi font modern sistem (Segoe UI / Cascadia / Arial / Consolas)."""
+    """Deteksi font modern sistem dengan fallback yang aman di Linux, Windows, dan macOS."""
     installed_fonts = set(tkfont.families())
-    font_ui = "Segoe UI" if "Segoe UI" in installed_fonts else ("Arial" if "Arial" in installed_fonts else "Helvetica")
-    font_code = "Cascadia Code" if "Cascadia Code" in installed_fonts else (
-        "JetBrains Mono" if "JetBrains Mono" in installed_fonts else "Consolas"
-    )
+
+    # Prioritas font UI
+    for f in ["Segoe UI", "Ubuntu", "DejaVu Sans", "Liberation Sans", "Arial", "Helvetica"]:
+        if f in installed_fonts:
+            font_ui = f
+            break
+    else:
+        font_ui = "Helvetica"
+
+    # Prioritas font Monospace / Code
+    for f in ["Cascadia Code", "JetBrains Mono", "Ubuntu Mono", "DejaVu Sans Mono", "Liberation Mono", "Consolas"]:
+        if f in installed_fonts:
+            font_code = f
+            break
+    else:
+        font_code = "Courier"
 
     return {
         "FONT_FAMILY_UI": font_ui,

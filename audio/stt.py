@@ -117,19 +117,21 @@ def get_recognizer():
         return _recognizer
     with _load_lock:
         if _recognizer is None:
-            t0 = time.time()
-            src = Path(_encoder)
-            opt = _ensure_optimized_encoder(src)
-            rec = None
-            if opt is not None:
-                try:
-                    rec = _build_recognizer(str(opt))
-                except Exception as e:
-                    logger.warning(f"[STT] Encoder teroptimasi gagal dimuat ({e}), pakai model asli")
-            if rec is None:
-                rec = _build_recognizer(str(src))
-            _recognizer = rec
-            logger.info(f"[STT] Model siap dalam {time.time() - t0:.1f}s")
+            from audio.scheduler import model_init_lock
+            with model_init_lock:
+                t0 = time.time()
+                src = Path(_encoder)
+                opt = _ensure_optimized_encoder(src)
+                rec = None
+                if opt is not None:
+                    try:
+                        rec = _build_recognizer(str(opt))
+                    except Exception as e:
+                        logger.warning(f"[STT] Encoder teroptimasi gagal dimuat ({e}), pakai model asli")
+                if rec is None:
+                    rec = _build_recognizer(str(src))
+                _recognizer = rec
+                logger.info(f"[STT] Model siap dalam {time.time() - t0:.1f}s")
     return _recognizer
 
 

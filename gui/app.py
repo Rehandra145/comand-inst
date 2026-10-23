@@ -75,18 +75,25 @@ class RobotGUIApp:
         self.sample_rate = 16000
         self.record_seconds = duration
 
-        # Prewarm & background loaders
-        from audio.stt import recognizer, create_stream, preload_async as stt_preload_async, is_ready as stt_is_ready
-        stt_preload_async()
+        # Prewarm & background loaders (sekuensial STT -> TTS untuk stabilitas C++ runtime)
+        from audio.stt import recognizer, create_stream, is_ready as stt_is_ready, get_recognizer
         self.stt_recognizer = recognizer
         self.stt_create_stream = create_stream
         self.stt_is_ready = stt_is_ready
 
-        try:
-            from audio.tts import warmup_async
-            warmup_async()
-        except Exception:
-            pass
+        def _bg_prewarm():
+            try:
+                get_recognizer()
+            except Exception as e:
+                logger.error(f"[STT] Preload model error: {e}")
+            try:
+                from audio.tts import warmup, precache_room_phrases
+                warmup()
+                precache_room_phrases()
+            except Exception as e:
+                logger.error(f"[TTS] Warmup model error: {e}")
+
+        threading.Thread(target=_bg_prewarm, daemon=True, name="Model-Prewarm").start()
 
         from nlu.pipeline import NLUPipeline
         self.pipeline = NLUPipeline(ros2_host=ros2_host, ros2_port=ros2_port)
@@ -241,7 +248,10 @@ class RobotGUIApp:
 
     def ui_call(self, fn):
         """Thread-safe UI invocation via root.after."""
-        self.root.after(0, fn)
+        try:
+            self.root.after(0, fn)
+        except Exception:
+            pass
 
     def show_user_view(self):
         self.current_view = "user"

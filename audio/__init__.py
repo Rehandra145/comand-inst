@@ -16,6 +16,7 @@ from audio.scheduler import (
     scheduler,
     set_thread_high_priority,
     pin_current_thread_to_cores,
+    model_init_lock,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "scheduler",
     "set_thread_high_priority",
     "pin_current_thread_to_cores",
+    "model_init_lock",
 ]

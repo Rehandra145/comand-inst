@@ -166,44 +166,46 @@ def _get_tts_engine():
         if _tts_engine is not None:
             return _tts_engine
 
-        try:
-            import sherpa_onnx
-        except ImportError:
-            logger.error("[TTS] sherpa-onnx belum terinstal. Jalankan: pip install sherpa-onnx")
-            return None
+        from audio.scheduler import model_init_lock
+        with model_init_lock:
+            try:
+                import sherpa_onnx
+            except ImportError:
+                logger.error("[TTS] sherpa-onnx belum terinstal. Jalankan: pip install sherpa-onnx")
+                return None
 
-        model_path = TTS_MODEL_DIR / TTS_MODEL_FILE
-        tokens_path = TTS_MODEL_DIR / "tokens.txt"
-        data_dir = TTS_MODEL_DIR / "espeak-ng-data"
+            model_path = TTS_MODEL_DIR / TTS_MODEL_FILE
+            tokens_path = TTS_MODEL_DIR / "tokens.txt"
+            data_dir = TTS_MODEL_DIR / "espeak-ng-data"
 
-        if not model_path.exists():
-            logger.error(
-                f"[TTS] Model tidak ditemukan di '{TTS_MODEL_DIR}'. "
-                "Jalankan: python download_model.py"
-            )
-            return None
+            if not model_path.exists():
+                logger.error(
+                    f"[TTS] Model tidak ditemukan di '{TTS_MODEL_DIR}'. "
+                    "Jalankan: python download_model.py"
+                )
+                return None
 
-        logger.info(f"[TTS] Loading model dari '{TTS_MODEL_DIR}'...")
+            logger.info(f"[TTS] Loading model dari '{TTS_MODEL_DIR}'...")
 
-        tts_config = sherpa_onnx.OfflineTtsConfig(
-            model=sherpa_onnx.OfflineTtsModelConfig(
-                vits=sherpa_onnx.OfflineTtsVitsModelConfig(
-                    model=str(model_path),
-                    tokens=str(tokens_path),
-                    data_dir=str(data_dir),
+            tts_config = sherpa_onnx.OfflineTtsConfig(
+                model=sherpa_onnx.OfflineTtsModelConfig(
+                    vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                        model=str(model_path),
+                        tokens=str(tokens_path),
+                        data_dir=str(data_dir),
+                    ),
+                    num_threads=TTS_NUM_THREADS,
+                    provider="cpu",
                 ),
-                num_threads=TTS_NUM_THREADS,
-                provider="cpu",
-            ),
-        )
+            )
 
-        if not tts_config.validate():
-            logger.error("[TTS] Konfigurasi model TTS tidak valid! Periksa path model.")
-            return None
+            if not tts_config.validate():
+                logger.error("[TTS] Konfigurasi model TTS tidak valid! Periksa path model.")
+                return None
 
-        _tts_engine = sherpa_onnx.OfflineTts(tts_config)
-        logger.info("[TTS] Engine berhasil diinisialisasi (offline Piper VITS id_ID)")
-        return _tts_engine
+            _tts_engine = sherpa_onnx.OfflineTts(tts_config)
+            logger.info("[TTS] Engine berhasil diinisialisasi (offline Piper VITS id_ID)")
+            return _tts_engine
 
 
 # =========================
