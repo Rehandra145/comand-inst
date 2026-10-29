@@ -22,3 +22,6 @@ ros2_config.json
 model/*.opt.onnx
 model/*.int8.onnx
 model/*.tmp.onnx
+
+#PAT
+PAT.txt

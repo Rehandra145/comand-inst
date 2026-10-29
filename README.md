@@ -19,9 +19,15 @@ Sistem pemrosesan perintah suara (*Voice-to-Command*) bahasa Indonesia untuk rob
   - [5.2 Resource Scheduling & Task Pinning](#52-resource-scheduling--task-pinning)
   - [5.3 In-Memory Audio Caching & Background Pre-Warming](#53-in-memory-audio-caching--background-pre-warming)
   - [5.4 Penggabungan Konteks Dialog Multi-Turn](#54-penggabungan-konteks-dialog-multi-turn)
+  - [5.5 Akselerasi Hardware & Telemetri Real-Time (GPU vs CPU Profile)](#55-akselerasi-hardware--telemetri-real-time-gpu-vs-cpu-profile)
 - [6. Desain GUI & Mode Operasi](#6-desain-gui--mode-operasi)
+  - [6.1 Mode Pengguna (End-User Kiosk Layanan Mandiri)](#61-mode-pengguna-end-user-kiosk-layanan-mandiri)
+  - [6.2 Mode Teknisi (Control Center / Dashboard)](#62-mode-teknisi-control-center--dashboard)
 - [7. Struktur Direktori Proyek](#7-struktur-direktori-proyek)
 - [8. Panduan Instalasi & Menjalankan](#8-panduan-instalasi--menjalankan)
+  - [8.1 Persyaratan Sistem & Akselerasi Hardware](#81-persyaratan-sistem--akselerasi-hardware)
+  - [8.2 Setup Dependensi & Model](#82-setup-dependensi--model)
+  - [8.3 Cara Menjalankan Program (GUI & CLI)](#83-cara-menjalankan-program-gui--cli)
 - [9. Pengujian & Verifikasi](#9-pengujian--verifikasi)
 
 ---
@@ -424,6 +430,14 @@ Fungsi penggabung konteks menangani variasi jawaban klarifikasi pengguna:
 
 Menghindari kalimat robot yang kaku dan monoton dengan variasi template sapaan awal (`greeting()`), konfirmasi navigasi (`navigate_confirm()`), pertanyaan lokasi (`ask_location()`), dan *fallback* perintah tak dikenali (`unknown_intent()`).
 
+### 5.7 Akselerasi Hardware & Telemetri Real-Time (`hw_monitor.py`)
+
+Untuk memastikan model neural network berjalan secara optimal pada perangkat komputasi tepi (*edge AI*), sistem dilengkapi modul telemetri khusus:
+- **Deteksi GPU NVIDIA Jetson & CUDA Execution Provider**: Mendeteksi secara dinamis apakah model STT (Zipformer RNN-T) dan TTS (Piper VITS) dieksekusi menggunakan akselerator **GPU CUDA** atau fallback ke **CPU Multi-Core**.
+- **Non-Blocking GPU (GR3D) Monitoring**: Membaca utilisasi engine 3D/Compute GPU Jetson langsung dari sysfs Linux (`/sys/devices/platform/gpu.0/load`) dengan overhead nol tanpa blocking sleep.
+- **Telemetri Sistem Komprehensif**: Mengukur utilisasi multi-core CPU (via delta kalkulasi non-blocking `/proc/stat`), konsumsi memori RAM (`/proc/meminfo`), dan sensor suhu termal CPU/GPU (`/sys/class/thermal`).
+- **Antarmuka Terintegrasi**: Data telemetri dipancarkan secara berkala ke badge header GUI, panel teknisi, dan live dashboard terminal CLI (`python main.py --monitor`).
+
 ---
 
 ## 6. Desain GUI & Mode Operasi
@@ -432,6 +446,7 @@ Antarmuka GUI dibangun menggunakan **Tkinter** dengan arsitektur **Modern Dual-V
 
 ### 6.1 Mode Pengguna (End-User Kiosk Layanan Mandiri)
 Dirancang khusus untuk pasien dan pengunjung rumah sakit:
+- **Header Global & Compute Badge**: Menampilkan status robot, mikrofon aktif, dan badge akselerasi real-time (`⚡ GPU: CUDA (xx%)` atau `💻 CPU (xx%)`).
 - **Persona Hero Card**: Menampilkan ekspresi wajah avatar ASCII dinamis (`(◕‿◕)`, `(👂‿👂)`, `(★‿★)`, `(＾▽＾)`, `(×_×)`) sesuai status interaksi robot.
 - **Giant Touch Voice Button**: Tombol sentuh sentral 1-ketukan untuk berbicara (*"SENTUH UNTUK BERBICARA"*). Dilengkapi indikator teks real-time yang langsung memperbarui tampilan tombol begitu ucapan pengguna mulai terdeteksi oleh mikrofon.
 - **Pilihan Tujuan Cepat (Instant Tiles)**: Ubin 1-sentuh ke tujuan favorit (Ruang ICU, Ruang IGD, Farmasi/Apotek, Poli Jantung, Poli Anak, Lobi Utama, Berhenti, Kembali ke Pos).
@@ -444,6 +459,7 @@ Dirancang khusus untuk pasien dan pengunjung rumah sakit:
 
 ### 6.2 Mode Teknisi (Control Center / Dashboard)
 Dirancang untuk teknisi, administrator, dan integrasi robotik:
+- **Monitor Akselerasi Komputasi (GPU vs CPU)**: Panel visual interaktif yang menampilkan identitas chip hardware (misal *NVIDIA Jetson Orin Nano*), status execution provider STT & TTS, utilisasi memori RAM, sensor suhu, serta *progress bar* real-time utilisasi engine **GPU (GR3D)** dan **CPU**.
 - **Telemetri NLU Real-Time**: Menampilkan live transkripsi STT, Intent terdeteksi beserta confidence score, parameter slots, dan status validasi.
 - **Monitor Transmisi Payload Node ROS 2**: Indikator visual real-time status pengiriman JSON payload ke Socket TCP ROS 2 (`● TERKIRIM ✓`, `✕ GAGAL KIRIM`, `⏸ DITAHAN`).
 - **Modal Konfigurasi Endpoint ROS 2**: Pengaturan Custom IP & Port target robot dengan tombol preset cepat (*Robot 10.107.245.221* dan *Localhost 127.0.0.1*) serta fitur **Uji Ping TCP** interaktif sebelum disimpan ke `ros2_config.json`.
@@ -460,6 +476,7 @@ Proyek ini telah direfaktor secara penuh ke dalam arsitektur modular per-domain 
 command-inst/
 ├── main.py                     # Entry point utama aplikasi (< 170 baris)
 ├── config.py                   # Konfigurasi global (model path, sample rate, threads, mic)
+├── hw_monitor.py               # Monitor telemetri real-time GPU (Tegra/CUDA), CPU, RAM & suhu
 ├── responses.py                # Variasi template respons dialog robot
 ├── download_model.py           # Script pengunduh & verifikasi model offline STT & TTS
 ├── quantize_model.py           # Script optimasi kuantisasi model ONNX INT8
@@ -489,7 +506,7 @@ command-inst/
 │   ├── theme.py                # Design tokens: palet warna, tipografi font, hover effects
 │   ├── modals.py               # Dialog modal pemilihan mic & konfigurasi IP/Port ROS 2
 │   ├── user_view.py            # View Mode Pengguna (Kiosk layanan mandiri pasien)
-│   └── admin_view.py           # View Mode Teknisi (telemetri NLU & monitor ROS 2)
+│   └── admin_view.py           # View Mode Teknisi (telemetri NLU, hardware monitor & ROS 2)
 │
 ├── cli/                        # Command Line Interface Layer
 │   ├── __init__.py             # Ekspor fungsi-fungsi CLI runner
@@ -507,45 +524,53 @@ command-inst/
 
 ## 8. Panduan Instalasi & Menjalankan
 
-### Persyaratan Sistem
+### 8.1 Persyaratan Sistem & Akselerasi Hardware
 - Python `>= 3.10`
-- Perangkat mikrofon yang terhubung (untuk mode GUI / suara langsung)
-- Speaker / Jack audio 3.5mm / HDMI (untuk suara output robot)
+- Perangkat mikrofon yang terhubung (USB / I2S / Array mic)
+- Speaker / Jack audio 3.5mm / HDMI (untuk audio respons robot)
 
-### Instalasi Dependensi
+#### Dukungan Akselerasi Komputasi:
+- **NVIDIA Jetson (Orin Nano / Orin NX / AGX / Xavier) & GPU CUDA**:
+  - Menggunakan paket `sherpa-onnx` dengan varian `+cuda` (`provider="cuda"`).
+  - Memanfaatkan *Unified Memory Architecture* (UMA) Jetson untuk inferensi streaming STT dan sintesis TTS dengan latensi ultra-rendah tanpa beban CPU tinggi.
+- **CPU Multi-Core (Raspberry Pi 4 / PC x86_64 / ARM64 Standar)**:
+  - Menggunakan ONNX Runtime CPU dengan model terkuantisasi INT8 (`encoder.int8.onnx`, `joiner.int8.onnx`) dan alokasi multi-thread yang optimal.
 
-#### Opsi 1: Menggunakan `uv` (Direkomendasikan - Sangat Cepat di Raspberry Pi)
+---
+
+### 8.2 Setup Dependensi & Model
+
+#### Instalasi Dependensi via `uv` (Direkomendasikan - Sangat Cepat):
 ```bash
-# Sinkronisasi langsung dari project
+# Sinkronisasi virtual environment
 uv sync
 
-# Atau pasang melalui requirements.txt
+# Atau instal langsung via requirements.txt
 uv pip install -r requirements.txt
 ```
 
-#### Opsi 2: Menggunakan `pip` Standar
+#### Instalasi via `pip` Standar:
 ```bash
 pip install -r requirements.txt
 ```
 
 > [!TIP]
-> Untuk instalasi di **Raspberry Pi 4 Model B (4GB RAM)**, pastikan paket sistem audio & GUI telah terpasang:
+> Pada sistem berbasis Linux / Debian / JetPack / Raspberry Pi OS, pastikan pustaka audio sistem dan Tkinter telah terpasang:
 > ```bash
 > sudo apt update && sudo apt install -y portaudio19-dev libasound2-dev libsndfile1 python3-tk
 > ```
 
-### Setup Model Offline STT & TTS
-Untuk mengunduh dan memverifikasi kelengkapan model offline STT (Zipformer RNN-T) dan TTS (Piper VITS):
+#### Unduh Model Offline STT & TTS:
 ```bash
 uv run python download_model.py
 # atau:
 python download_model.py
 ```
-> Skrip secara otomatis mendeteksi model yang sudah ada di folder `model/` dan hanya mengunduh file yang belum tersedia tanpa mengulang dari awal. Anda juga dapat menggunakan opsi `--stt` atau `--tts` untuk mengunduh model tertentu saja.
+> Skrip otomatis memeriksa file yang sudah ada di folder `model/` dan hanya mengunduh file yang belum lengkap.
 
 ---
 
-### Menjalankan Program
+### 8.3 Cara Menjalankan Program (GUI & CLI)
 
 #### 1. Mode GUI Tkinter Desktop (Default):
 ```bash
@@ -553,77 +578,70 @@ uv run python main.py
 # atau paksa mode GUI:
 uv run python main.py --gui
 ```
-- Menjalankan antarmuka Kiosk Mode Pengguna secara default.
-- Sentuh tombol **`[ 🛠️ Mode Teknisi ]`** di kanan atas untuk beralih ke dashboard kontrol teknisi.
-- Sentuh tombol **`[ 🎙️ SENTUH UNTUK BERBICARA ]`** untuk memulai interaksi suara natural.
-- Pilih salah satu **Ubin Tujuan Cepat** untuk navigasi sekali sentuh.
+- Berjalan otomatis dalam **Mode Kiosk Pengguna** dengan indikator `⚡ GPU: CUDA (xx%)` di kanan atas header.
+- Tekan **`[ 🛠️ Mode Teknisi ]`** untuk membuka panel telemetri lengkap, diagnostik NLU, pengatur endpoint ROS 2, dan grafik utilisasi **GPU (GR3D)** serta **CPU**.
 
-#### 2. Mode Tugas Dialog Interaktif (Terminal CLI):
-Jalankan alur dialog sekuensial langsung dari terminal (TTS menyapa $\rightarrow$ rekam perintah $\rightarrow$ tanya klarifikasi slot jika kurang $\rightarrow$ konfirmasi dua arah $\rightarrow$ kirim ke ROS 2):
+#### 2. Mode Live Monitor Hardware & Telemetri Komputasi (Terminal):
+Jika Anda ingin memantau secara langsung apakah model sedang berjalan di GPU atau CPU di terminal terpisah (mirip `jtop`/`tegrastats` versi ringkas):
+```bash
+uv run python main.py --monitor
+```
+Menampilkan:
+- Identitas board & arsitektur (misal: *NVIDIA Jetson Orin Nano*).
+- Status execution provider STT & TTS (`CUDA` atau `CPU`).
+- Bar visual persentase utilisasi **GPU Core (GR3D)** dan suhu termal real-time.
+- Bar visual persentase **CPU Multi-Core**, suhu, dan penggunaan memori RAM.
+
+#### 3. Mode Menu CLI Interaktif (Terminal Headless / Ubuntu Server):
+Cocok saat menjalankan program melalui sesi SSH atau server tanpa tampilan monitor:
+```bash
+uv run python main.py --cli
+```
+Pilihan menu:
+- `[1]` Mode Tugas Dialog Interaktif (TTS ↔ STT Sequential)
+- `[2]` Bicara Langsung via Mikrofon (Streaming STT + NLU)
+- `[3]` Ketik Perintah Teks Manual (Pengujian Cepat)
+- `[4]` List Seluruh Perangkat Input Audio
+- `[5]` Tes Diagnosa & Level Volume Mikrofon (RMS & Peak)
+- `[6]` Monitor Hardware (GPU vs CPU Live Telemetry) (Tegra/CUDA)
+- `[q]` Keluar
+
+#### 4. Mode Tugas Dialog Interaktif (Terminal CLI):
+Alur percakapan 2-arah terpandu sekuensial (Robot menyapa $\rightarrow$ dengarkan pengguna $\rightarrow$ tanya kekurangan slot $\rightarrow$ konfirmasi suara $\rightarrow$ publish ke ROS 2):
 ```bash
 uv run python main.py --task
 # atau alias:
 uv run python main.py --tugas
 ```
 
-#### 3. Mode Menu CLI Interaktif (Terminal Headless / Ubuntu Server):
-Jika dijalankan di Ubuntu Server tanpa monitor/X11, program akan otomatis membuka menu terminal interaktif:
+#### 5. Kustomisasi Target Node ROS 2 via Argumen:
 ```bash
-uv run python main.py --cli
-```
-Pilihan menu yang tersedia:
-- `[1]` Mode Tugas Dialog Interaktif (TTS ↔ STT Sequential)
-- `[2]` Bicara Langsung via Mikrofon (Streaming STT + NLU)
-- `[3]` Ketik Perintah Teks Manual
-- `[4]` List Perangkat Input Audio
-- `[5]` Tes Diagnosa & Level Volume Mikrofon
-- `[q]` Keluar
-
-#### 4. Kustomisasi IP & Port ROS 2 via Argumen:
-```bash
-# Menentukan host & port custom socket node ROS 2:
 python main.py --ros2-host 192.168.1.120 --ros2-port 5000
 ```
 
-#### 5. Mode Mikrofon Langsung 1-Kali (Streaming Terminal):
+#### 6. Mode Mikrofon Langsung 1-Kali (Streaming Terminal):
 ```bash
-# Rekam suara langsung selama 5 detik:
+# Rekam suara langsung 5 detik via terminal
 python main.py --mic
 
-# Rekam dengan durasi kustom (misal 7 detik):
-python main.py --mic --duration 7
-
-# Pilih ID mikrofon tertentu:
-python main.py --mic --device 1
+# Rekam dengan durasi & ID mic spesifik
+python main.py --mic --duration 7 --device 1
 ```
 
-#### 6. Cek & Diagnosa Driver Mikrofon:
+#### 7. Cek & Diagnosa Driver Mikrofon:
 ```bash
-# Lihat daftar seluruh input mikrofon yang terdeteksi
+# Tampilkan daftar seluruh mikrofon terdeteksi
 python main.py --list-devices
 
-# Diagnosa driver & uji rekam level volume (otomatis ukur RMS & Peak amplitude)
+# Rekam sampel uji coba 3 detik dan analisis level sinyal audio
 python main.py --test-mic
 ```
 
-#### 7. Mode Teks Langsung (Tanpa Mikrofon, untuk Pengujian Cepat NLU):
+#### 8. Mode Teks Langsung (Tanpa Mikrofon, Uji NLU Cepat):
 ```bash
-# Perintah navigasi ruangan bernomor (digit mode)
-python main.py --text "antar ke ruang satu nol empat"
-
-# Perintah navigasi ruangan bertingkat (compound mode)
-python main.py --text "bawa ke ruang tiga ratus satu"
-
-# Perintah pengantaran obat ke ruangan
-python main.py --text "tolong antarkan obat batuk ke ruang ICU"
-
-# Perintah dengan typo fonetik STT
-python main.py --text "BAHWA KE UGD"
-
-# Perintah pergerakan robot
+python main.py --text "tolong antarkan obat ke ruang ICU"
+python main.py --text "antar saya ke ruang 204"
 python main.py --text "maju dua meter"
-
-# Perintah berhenti
 python main.py --text "berhenti sekarang"
 ```
 
