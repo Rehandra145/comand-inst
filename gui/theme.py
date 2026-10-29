@@ -80,6 +80,10 @@ if sys.platform.startswith("linux"):
         "🗑️": "[Hapus]",
         "🗑": "[Hapus]",
         "🔄": "[Reload]",
+        "⚡": "[GPU]",
+        "📊": "[Stats]",
+        "💻": "[CPU]",
+        "🔋": "[Bat]",
     }
 
     def _sanitize_tk_str(s):

@@ -150,9 +150,21 @@ if __name__ == "__main__":
         help="Nomor port TCP target node ROS 2 robot (default: 5000)",
     )
 
+    parser.add_argument(
+        "--monitor",
+        action="store_true",
+        help="Tampilkan live dashboard telemetri utilisasi GPU (Tegra) vs CPU di terminal.",
+    )
+
     args = parser.parse_args()
 
-    # 0. Task dialog mode via terminal
+    # 0. Live hardware compute monitor via terminal
+    if args.monitor:
+        from hw_monitor import run_live_monitor_cli
+        run_live_monitor_cli()
+        sys.exit(0)
+
+    # 0.1 Task dialog mode via terminal
     if args.task or getattr(args, "tugas", False):
         run_task_cli(duration=args.duration, device=args.device, ros2_host=args.ros2_host, ros2_port=args.ros2_port)
         sys.exit(0)

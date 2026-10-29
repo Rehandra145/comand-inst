@@ -47,7 +47,7 @@ TTS_SPEAKER_ID = 0
 TTS_SPEED = 1.0
 
 # Jumlah CPU thread untuk TTS inference (2 optimal untuk Pi 4 quad-core)
-TTS_NUM_THREADS = 2
+TTS_NUM_THREADS = 4
 
 # Perangkat output audio Raspberry Pi (aplay):
 # "plughw:2,0" = jack audio 3.5mm,  "plughw:0,0" = HDMI
@@ -156,6 +156,41 @@ def clear_cache():
     shutil.rmtree(TTS_DISK_CACHE_DIR, ignore_errors=True)
 
 
+def _make_gen_config(
+    text: str,
+    speed: float = TTS_SPEED,
+    sid: int = TTS_SPEAKER_ID,
+):
+    """
+    Buat GenerationConfig dengan phoneme_codepoints yang diperoleh dari
+    piper_phonemize (pengganti espeak-ng bawaan sherpa-onnx >= v2.0.0).
+
+    piper_phonemize.phonemize_espeak menghasilkan daftar IPA per kalimat;
+    masing-masing karakter IPA dikonversi ke codepoint Unicode (ord) sebelum
+    dikirim ke sherpa_onnx.GenerationConfig.phoneme_codepoints.
+    """
+    import sherpa_onnx
+    try:
+        import piper_phonemize
+        phonemes_per_sentence = piper_phonemize.phonemize_espeak(text, voice="id")
+        sentence_codepoints = [
+            [ord(ch) for ch in sentence]
+            for sentence in phonemes_per_sentence
+        ]
+    except ImportError:
+        logger.warning(
+            "[TTS] piper_phonemize tidak terinstal. "
+            "Jalankan: uv add piper-phonemize  (atau pip install piper-phonemize)"
+        )
+        sentence_codepoints = []
+
+    config = sherpa_onnx.GenerationConfig()
+    config.phoneme_codepoints = sentence_codepoints
+    config.sid = sid
+    config.speed = speed
+    return config
+
+
 def _get_tts_engine():
     """Lazy-load TTS engine sekali saat pertama dipakai (thread-safe singleton)."""
     global _tts_engine
@@ -176,7 +211,6 @@ def _get_tts_engine():
 
             model_path = TTS_MODEL_DIR / TTS_MODEL_FILE
             tokens_path = TTS_MODEL_DIR / "tokens.txt"
-            data_dir = TTS_MODEL_DIR / "espeak-ng-data"
 
             if not model_path.exists():
                 logger.error(
@@ -192,10 +226,12 @@ def _get_tts_engine():
                     vits=sherpa_onnx.OfflineTtsVitsModelConfig(
                         model=str(model_path),
                         tokens=str(tokens_path),
-                        data_dir=str(data_dir),
+                        # data_dir (espeak-ng-data) dihapus: deprecated sejak sherpa-onnx v2.0.0.
+                        # Fonemi kini dihasilkan oleh piper_phonemize dan dikirim via
+                        # GenerationConfig.phoneme_codepoints.
                     ),
                     num_threads=TTS_NUM_THREADS,
-                    provider="cpu",
+                    provider="cuda",
                 ),
             )
 
@@ -249,7 +285,7 @@ def warmup() -> bool:
         synth_count = 0
         for phrase, key in missing:
             with _generate_lock:
-                audio = engine.generate(phrase, sid=TTS_SPEAKER_ID, speed=TTS_SPEED)
+                audio = engine.generate(phrase, _make_gen_config(phrase, speed=TTS_SPEED, sid=TTS_SPEAKER_ID))
             samples = np.array(audio.samples, dtype=np.float32)
             _memory_cache_put(key, samples, audio.sample_rate)
             _disk_cache_save(key, samples, audio.sample_rate)
@@ -374,7 +410,7 @@ def precache_room_phrases():
             if _disk_cache_path(key).exists():
                 continue
             with _generate_lock:
-                audio = engine.generate(text, sid=TTS_SPEAKER_ID, speed=TTS_SPEED)
+                audio = engine.generate(text, _make_gen_config(text, speed=TTS_SPEED, sid=TTS_SPEAKER_ID))
             samples = np.array(audio.samples, dtype=np.float32)
             _disk_cache_save(key, samples, audio.sample_rate)
             done += 1
@@ -430,7 +466,7 @@ def synthesize(text: str, speed: float = TTS_SPEED) -> Optional[Tuple[np.ndarray
     try:
         t0 = time.time()
         with _generate_lock:
-            audio = engine.generate(clean_text, sid=TTS_SPEAKER_ID, speed=speed)
+            audio = engine.generate(clean_text, _make_gen_config(clean_text, speed=speed, sid=TTS_SPEAKER_ID))
         elapsed = time.time() - t0
     finally:
         with _foreground_lock:

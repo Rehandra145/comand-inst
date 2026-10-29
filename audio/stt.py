@@ -94,7 +94,7 @@ def _build_recognizer(encoder: str):
         sample_rate=STT_RATE,
         feature_dim=80,
         decoding_method="greedy_search",
-        provider="cpu",
+        provider="cuda",
         enable_endpoint_detection=True,
         rule1_min_trailing_silence=2.8,
         rule2_min_trailing_silence=2.2,

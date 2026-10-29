@@ -132,6 +132,9 @@ class RobotGUIApp:
         # Initial greeting in chat feeds
         self.append_dialog_history("🤖 Robot", "Halo! Saya asisten robot panduan rumah sakit. Silakan bicara atau sentuh tombol tujuan.", COLOR_GREEN)
 
+        # Mulai loop telemetri monitor hardware GPU vs CPU
+        self._tick_hw_monitor()
+
     def _build_header(self):
         header_frame = tk.Frame(
             self.root,
@@ -218,6 +221,20 @@ class RobotGUIApp:
         )
         self.status_badge.pack(side="right")
 
+        self.compute_badge_label = tk.Label(
+            header_right,
+            text="⚡ GPU: CUDA (0%)",
+            font=self.fonts["F_CODE_BOLD"],
+            fg=COLOR_GREEN,
+            bg=COLOR_GREEN_BG,
+            padx=10,
+            pady=4,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=COLOR_GREEN_BORDER,
+        )
+        self.compute_badge_label.pack(side="right", padx=(6, 0))
+
         dev_short = "Default"
         try:
             import sounddevice as sd
@@ -245,6 +262,50 @@ class RobotGUIApp:
         if hasattr(self.pipeline.ros2_adapter, "port"):
             target_endpoint = f"{target_endpoint}:{self.pipeline.ros2_adapter.port}"
         self.admin_view.ros2_title_label.config(text=f"🌐 TRANSMISI PAYLOAD NODE ROS 2 [{target_endpoint}]:")
+
+    def _tick_hw_monitor(self):
+        """Update telemetri hardware GPU vs CPU secara periodik non-blocking."""
+        try:
+            from hw_monitor import hw_monitor
+            snap = hw_monitor.get_snapshot()
+            gpu_load = snap.get("gpu_load", 0.0)
+            is_cuda = snap.get("is_cuda", True)
+
+            if is_cuda:
+                badge_text = f"⚡ GPU: CUDA ({gpu_load:.0f}%)"
+                if gpu_load > 2.0:
+                    badge_fg = COLOR_GREEN
+                    badge_bg = COLOR_GREEN_BG
+                    badge_border = COLOR_GREEN_BORDER
+                else:
+                    badge_fg = COLOR_SKY
+                    badge_bg = COLOR_SKY_BG
+                    badge_border = COLOR_SKY_BORDER
+            else:
+                cpu_load = snap.get("cpu_load", 0.0)
+                badge_text = f"💻 CPU ({cpu_load:.0f}%)"
+                badge_fg = COLOR_AMBER
+                badge_bg = COLOR_AMBER_BG
+                badge_border = COLOR_AMBER_BORDER
+
+            if hasattr(self, "compute_badge_label") and self.compute_badge_label.winfo_exists():
+                self.compute_badge_label.config(
+                    text=badge_text,
+                    fg=badge_fg,
+                    bg=badge_bg,
+                    highlightbackground=badge_border,
+                )
+
+            if hasattr(self, "admin_view") and hasattr(self.admin_view, "update_hw_telemetry"):
+                self.admin_view.update_hw_telemetry(snap)
+        except Exception as e:
+            logger.debug(f"[HW-MONITOR] Tick error: {e}")
+        finally:
+            try:
+                if self.root.winfo_exists():
+                    self.root.after(1000, self._tick_hw_monitor)
+            except Exception:
+                pass
 
     def ui_call(self, fn):
         """Thread-safe UI invocation via root.after."""

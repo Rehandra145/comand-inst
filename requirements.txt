@@ -9,8 +9,8 @@
 # ==============================================================================
 
 # Speech-to-Text Engine (Sherpa-ONNX streaming-native untuk ARM64/CPU)
-sherpa-onnx>=1.13.8
-sherpa-onnx-bin>=1.13.8
+sherpa-onnx>=1.17.0
+sherpa-onnx-bin>=1.17.0
 
 # Runtime Inference Model ONNX
 onnxruntime>=1.20.0

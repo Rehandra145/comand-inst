@@ -237,6 +237,122 @@ class AdminView:
         btn_ros2_cfg.pack(side="left", padx=(6, 0))
         add_hover_effect(btn_ros2_cfg, BG_CARD, BG_CARD_ALT, BORDER, BORDER_HOVER)
 
+        # 2.5 Hardware Acceleration & Compute Telemetry Card
+        hw_card = tk.Frame(
+            self.frame,
+            bg=BG_CARD,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+            padx=18,
+            pady=8,
+        )
+        hw_card.pack(fill="x", pady=(0, 10))
+
+        hw_header = tk.Frame(hw_card, bg=BG_CARD)
+        hw_header.pack(fill="x", pady=(0, 6))
+
+        tk.Label(
+            hw_header,
+            text="⚡ MONITOR AKSELERASI KOMPUTASI (GPU / CPU)",
+            font=fonts["F_SECTION"],
+            fg=FG_SUB,
+            bg=BG_CARD,
+        ).pack(side="left")
+
+        self.hw_accel_badge = tk.Label(
+            hw_header,
+            text="● GPU (CUDA) AKTIF",
+            font=fonts["F_CODE_BOLD"],
+            fg=COLOR_GREEN,
+            bg=BG_CARD,
+        )
+        self.hw_accel_badge.pack(side="right")
+
+        hw_badges_bar = tk.Frame(hw_card, bg=BG_CARD)
+        hw_badges_bar.pack(fill="x", pady=(0, 6))
+
+        self.hw_chip_label = tk.Label(
+            hw_badges_bar,
+            text="📟 Jetson Orin",
+            font=fonts["F_CODE"],
+            fg=FG_WHITE,
+            bg=BG_CARD_ALT,
+            padx=8,
+            pady=3,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+        )
+        self.hw_chip_label.pack(side="left", padx=(0, 6))
+
+        self.hw_stt_label = tk.Label(
+            hw_badges_bar,
+            text="🎙️ STT: CUDA",
+            font=fonts["F_CODE"],
+            fg=COLOR_SKY,
+            bg=BG_CARD_ALT,
+            padx=8,
+            pady=3,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+        )
+        self.hw_stt_label.pack(side="left", padx=(0, 6))
+
+        self.hw_tts_label = tk.Label(
+            hw_badges_bar,
+            text="🔊 TTS: CUDA",
+            font=fonts["F_CODE"],
+            fg=COLOR_PURPLE,
+            bg=BG_CARD_ALT,
+            padx=8,
+            pady=3,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+        )
+        self.hw_tts_label.pack(side="left", padx=(0, 6))
+
+        self.hw_mem_label = tk.Label(
+            hw_badges_bar,
+            text="💾 RAM: -",
+            font=fonts["F_CODE"],
+            fg=FG_SUB,
+            bg=BG_CARD_ALT,
+            padx=8,
+            pady=3,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+        )
+        self.hw_mem_label.pack(side="right")
+
+        # Live meters row: GPU (GR3D) & CPU
+        meters_row = tk.Frame(hw_card, bg=BG_CARD_ALT, padx=10, pady=6, highlightthickness=1, highlightbackground=BORDER)
+        meters_row.pack(fill="x")
+
+        # GPU Meter
+        gpu_col = tk.Frame(meters_row, bg=BG_CARD_ALT)
+        gpu_col.pack(side="left", fill="x", expand=True, padx=(0, 10))
+
+        gpu_top = tk.Frame(gpu_col, bg=BG_CARD_ALT)
+        gpu_top.pack(fill="x")
+        tk.Label(gpu_top, text="GPU (GR3D CORE):", font=(fonts["FONT_FAMILY_UI"], 8, "bold"), fg=COLOR_GREEN, bg=BG_CARD_ALT).pack(side="left")
+        self.hw_gpu_val = tk.Label(gpu_top, text="0.0% (Standby)", font=fonts["F_CODE_BOLD"], fg=COLOR_GREEN, bg=BG_CARD_ALT)
+        self.hw_gpu_val.pack(side="right")
+
+        self.gpu_bar_canvas = tk.Canvas(gpu_col, height=6, bg=BG_BASE, highlightthickness=0)
+        self.gpu_bar_canvas.pack(fill="x", pady=(3, 0))
+
+        # CPU Meter
+        cpu_col = tk.Frame(meters_row, bg=BG_CARD_ALT)
+        cpu_col.pack(side="left", fill="x", expand=True, padx=(10, 0))
+
+        cpu_top = tk.Frame(cpu_col, bg=BG_CARD_ALT)
+        cpu_top.pack(fill="x")
+        tk.Label(cpu_top, text="CPU MULTI-CORE:", font=(fonts["FONT_FAMILY_UI"], 8, "bold"), fg=COLOR_SKY, bg=BG_CARD_ALT).pack(side="left")
+        self.hw_cpu_val = tk.Label(cpu_top, text="0.0%", font=fonts["F_CODE_BOLD"], fg=COLOR_SKY, bg=BG_CARD_ALT)
+        self.hw_cpu_val.pack(side="right")
+
+        self.cpu_bar_canvas = tk.Canvas(cpu_col, height=6, bg=BG_BASE, highlightthickness=0)
+        self.cpu_bar_canvas.pack(fill="x", pady=(3, 0))
+
         # 3. Telemetry & NLU Status Card
         telemetry_card = tk.Frame(
             self.frame,
@@ -499,3 +615,54 @@ class AdminView:
         self.dialog_history_box.tag_configure("tag_manual", foreground=COLOR_PRIMARY, font=fonts["F_CODE_BOLD"])
         self.dialog_history_box.tag_configure("tag_ros2", foreground=COLOR_SKY, font=fonts["F_CODE_BOLD"])
         self.dialog_history_box.tag_configure("tag_info", foreground=FG_SUB)
+
+    def update_hw_telemetry(self, snap: dict):
+        """Update visual telemetri hardware GPU vs CPU secara real-time."""
+        chip = snap.get("device_model", "Tegra Device")
+        if len(chip) > 30:
+            chip = chip[:28] + ".."
+        self.hw_chip_label.config(text=f"📟 {chip}")
+
+        stt_p = snap.get("stt_provider", "cpu").upper()
+        tts_p = snap.get("tts_provider", "cpu").upper()
+        self.hw_stt_label.config(text=f"🎙️ STT: {stt_p}")
+        self.hw_tts_label.config(text=f"🔊 TTS: {tts_p}")
+
+        ram_used = snap.get("ram_used_mb", 0)
+        ram_total = snap.get("ram_total_mb", 0)
+        ram_pct = snap.get("ram_pct", 0.0)
+        self.hw_mem_label.config(text=f"💾 RAM: {ram_used}/{ram_total} MB ({ram_pct:.0f}%)")
+
+        gpu_pct = snap.get("gpu_load", 0.0)
+        cpu_pct = snap.get("cpu_load", 0.0)
+        gpu_temp = snap.get("gpu_temp")
+        cpu_temp = snap.get("cpu_temp")
+
+        g_temp_str = f" • {gpu_temp:.1f}°C" if gpu_temp else ""
+        c_temp_str = f" • {cpu_temp:.1f}°C" if cpu_temp else ""
+
+        if gpu_pct > 2.0:
+            self.hw_gpu_val.config(text=f"{gpu_pct:.1f}% (INFERENCE ACTIVE{g_temp_str})", fg=COLOR_GREEN)
+            self.hw_accel_badge.config(text="● GPU (CUDA) AKTIF", fg=COLOR_GREEN)
+        else:
+            self.hw_gpu_val.config(text=f"{gpu_pct:.1f}% (Standby{g_temp_str})", fg=FG_SUB)
+            self.hw_accel_badge.config(text="● GPU (CUDA) STANDBY", fg=FG_SUB)
+
+        self.hw_cpu_val.config(text=f"{cpu_pct:.1f}%{c_temp_str}")
+
+        # Update visual progress bar canvas
+        try:
+            gw = self.gpu_bar_canvas.winfo_width()
+            if gw > 1:
+                self.gpu_bar_canvas.delete("all")
+                g_fill = max(2, int(gw * (gpu_pct / 100.0)))
+                bar_color = COLOR_GREEN if gpu_pct > 2.0 else COLOR_PRIMARY
+                self.gpu_bar_canvas.create_rectangle(0, 0, g_fill, 6, fill=bar_color, width=0)
+
+            cw = self.cpu_bar_canvas.winfo_width()
+            if cw > 1:
+                self.cpu_bar_canvas.delete("all")
+                c_fill = max(2, int(cw * (cpu_pct / 100.0)))
+                self.cpu_bar_canvas.create_rectangle(0, 0, c_fill, 6, fill=COLOR_SKY, width=0)
+        except Exception:
+            pass

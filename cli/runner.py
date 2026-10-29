@@ -73,6 +73,21 @@ CLR_RESET = "\033[0m"
 def print_banner(ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):
     """Cetak banner modern identitas robot di terminal."""
     target = f"{ros2_host or '10.107.245.221'}:{ros2_port or 5000}"
+    try:
+        from hw_monitor import hw_monitor
+        snap = hw_monitor.get_snapshot()
+        accel_str = f"GPU (CUDA {snap['cuda_version'] or '12.6'})" if snap.get("is_cuda") else "CPU (Standard)"
+        raw_model = snap.get("device_model", "NVIDIA Jetson")
+        if "Orin Nano" in raw_model:
+            chip_short = "Jetson Orin Nano"
+        elif "Orin" in raw_model:
+            chip_short = "Jetson Orin"
+        else:
+            chip_short = raw_model[:18]
+    except Exception:
+        accel_str = "GPU (CUDA 12.6)"
+        chip_short = "Jetson Orin Nano"
+
     print(f"""
 {CLR_CYAN}╭──────────────────────────────────────────────────────────────────────╮
 │   {CLR_WHITE}🤖  R O B O T   V O I C E   A S S I S T A N T{CLR_CYAN}                      │
@@ -80,6 +95,7 @@ def print_banner(ros2_host: Optional[str] = None, ros2_port: Optional[int] = Non
 │  ──────────────────────────────────────────────────────────────────  │
 │   {CLR_GREEN}● STATUS : ONLINE{CLR_CYAN}           {CLR_WHITE}● CORE : Zipformer RNN-T (INT8){CLR_CYAN}       │
 │   {CLR_YELLOW}● TTS    : Piper VITS{CLR_CYAN}       {CLR_WHITE}● ROS2 : {target:<20}{CLR_CYAN} │
+│   {CLR_GREEN}● ACCEL  : {accel_str:<20}{CLR_CYAN} {CLR_WHITE}● CHIP : {chip_short:<20}{CLR_CYAN} │
 ╰──────────────────────────────────────────────────────────────────────╯{CLR_RESET}""")
 
 
@@ -101,6 +117,9 @@ def print_menu_card():
 │                                                                      │
 │   {CLR_YELLOW}[5]{CLR_RESET}  {CLR_WHITE}⚡  Tes Diagnosa & Volume Mikrofon{CLR_RESET} {CLR_MUTED}(Mic Check){CLR_CYAN}              │
 │        {CLR_MUTED}Periksa sample rate & level sensitivitas suara{CLR_CYAN}                 │
+│                                                                      │
+│   {CLR_YELLOW}[6]{CLR_RESET}  {CLR_WHITE}📊  Monitor Hardware (GPU vs CPU Live){CLR_RESET} {CLR_MUTED}(Tegra/CUDA){CLR_CYAN}        │
+│        {CLR_MUTED}Pantau utilisasi real-time GPU (GR3D), CPU, dan suhu{CLR_CYAN}             │
 │                                                                      │
 │   {CLR_RED}[q]{CLR_RESET}  {CLR_WHITE}🚪  Keluar dari Aplikasi{CLR_RESET} {CLR_MUTED}(Exit){CLR_CYAN}                               │
 │                                                                      │
@@ -540,7 +559,7 @@ def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_ho
     while True:
         print_menu_card()
         try:
-            choice = input(f"   {CLR_CYAN}❯{CLR_RESET} {CLR_BOLD}Pilih menu [1/2/3/4/5/q]:{CLR_RESET} ").strip().lower()
+            choice = input(f"   {CLR_CYAN}❯{CLR_RESET} {CLR_BOLD}Pilih menu [1/2/3/4/5/6/q]:{CLR_RESET} ").strip().lower()
         except (KeyboardInterrupt, EOFError):
             print(f"\n{CLR_MUTED}Keluar dari program...{CLR_RESET}\n")
             break
@@ -562,11 +581,14 @@ def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_ho
             list_audio_devices()
         elif choice == "5":
             test_mic_hardware(device=device, duration=duration)
+        elif choice == "6":
+            from hw_monitor import run_live_monitor_cli
+            run_live_monitor_cli()
         elif choice in ["q", "quit", "exit"]:
             print(f"\n  {CLR_GREEN}✓ Keluar dari program. Sampai jumpa!{CLR_RESET}\n")
             break
         else:
-            print(f"\n  {CLR_RED}[!] Pilihan tidak valid, silakan ketik nomor 1-5 atau q.{CLR_RESET}")
+            print(f"\n  {CLR_RED}[!] Pilihan tidak valid, silakan ketik nomor 1-6 atau q.{CLR_RESET}")
 
 
 def run_text_mode(text: str, ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):
