@@ -10,7 +10,8 @@
 
 # Speech-to-Text & Text-to-Speech Engine (Sherpa-ONNX streaming/offline)
 sherpa-onnx>=2.0.1
-piper-phonemize>=1.1.0
+piper-phonemize>=1.1.0; sys_platform != 'win32'
+piper-phonemize-fix>=1.2.0; sys_platform == 'win32'
 
 # Audio Capture & Processing (Membutuhkan libportaudio2 & libsndfile1 di sistem)
 sounddevice>=0.5.6
