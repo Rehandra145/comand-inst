@@ -13,6 +13,7 @@ import numpy as np
 import sherpa_onnx
 
 from config import MODEL, STT_RATE, NUM_THREADS
+from audio.provider import get_preferred_provider, set_stt_provider, get_stt_provider
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +85,34 @@ def _ensure_optimized_encoder(src: Path) -> Optional[Path]:
         return None
 
 
-def _build_recognizer(encoder: str):
-    return sherpa_onnx.OnlineRecognizer.from_transducer(
+def _build_recognizer(encoder: str, provider: Optional[str] = None):
+    preferred = provider or get_preferred_provider()
+    if preferred == "cuda":
+        try:
+            logger.info("[STT] Mencoba memuat recognizer dengan GPU (CUDA)...")
+            rec = sherpa_onnx.OnlineRecognizer.from_transducer(
+                tokens=_tokens,
+                encoder=encoder,
+                decoder=_decoder,
+                joiner=_joiner,
+                num_threads=NUM_THREADS,
+                sample_rate=STT_RATE,
+                feature_dim=80,
+                decoding_method="greedy_search",
+                provider="cuda",
+                enable_endpoint_detection=True,
+                rule1_min_trailing_silence=2.8,
+                rule2_min_trailing_silence=2.2,
+                rule3_min_utterance_length=30.0,
+            )
+            set_stt_provider("cuda")
+            logger.info("[STT] Recognizer aktif menggunakan GPU (CUDA).")
+            return rec
+        except Exception as e:
+            logger.warning(f"[STT] Inisialisasi GPU (CUDA) gagal ({e}), otomatis fallback ke CPU...")
+
+    # Fallback ke CPU
+    rec = sherpa_onnx.OnlineRecognizer.from_transducer(
         tokens=_tokens,
         encoder=encoder,
         decoder=_decoder,
@@ -94,12 +121,33 @@ def _build_recognizer(encoder: str):
         sample_rate=STT_RATE,
         feature_dim=80,
         decoding_method="greedy_search",
-        provider="cuda",
+        provider="cpu",
         enable_endpoint_detection=True,
         rule1_min_trailing_silence=2.8,
         rule2_min_trailing_silence=2.2,
         rule3_min_utterance_length=30.0,
     )
+    set_stt_provider("cpu")
+    logger.info("[STT] Recognizer aktif menggunakan CPU.")
+    return rec
+
+
+def reload_recognizer(provider: Optional[str] = None):
+    """Reload instance recognizer dengan provider tertentu (thread-safe)."""
+    global _recognizer
+    with _load_lock:
+        from audio.scheduler import model_init_lock
+        with model_init_lock:
+            src = Path(_encoder)
+            opt = _ensure_optimized_encoder(src)
+            target = str(opt) if opt is not None else str(src)
+            _recognizer = _build_recognizer(target, provider=provider)
+    return _recognizer
+
+
+def get_active_provider() -> str:
+    """Ambil status execution provider aktif pada modul STT ('cuda' atau 'cpu')."""
+    return get_stt_provider()
 
 
 # =========================

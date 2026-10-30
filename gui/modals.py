@@ -21,9 +21,16 @@ from gui.theme import (
     COLOR_PRIMARY_BG,
     COLOR_PRIMARY_BORDER,
     COLOR_GREEN,
+    COLOR_GREEN_BG,
+    COLOR_GREEN_BORDER,
     COLOR_AMBER,
+    COLOR_AMBER_BG,
+    COLOR_AMBER_BORDER,
     COLOR_RED,
     COLOR_SKY,
+    COLOR_SKY_BG,
+    COLOR_SKY_BORDER,
+    add_hover_effect,
 )
 from nlu.ros2_adapter import save_ros2_config, SocketROS2Adapter
 
@@ -363,3 +370,151 @@ def open_ros2_config_modal(
         command=modal.destroy,
     )
     btn_cancel.pack(side="right")
+
+
+def open_restart_confirm_modal(
+    root: tk.Tk,
+    fonts: dict,
+    target_mode: str,
+    on_confirm: Callable[[], None],
+):
+    """Buka dialog modal konfirmasi modern bertema Dark Studio untuk restart aplikasi."""
+    modal = tk.Toplevel(root)
+    modal.title("Konfirmasi Restart Aplikasi")
+    mw, mh = 500, 310
+    root.update_idletasks()
+    rx = root.winfo_x() + (root.winfo_width() // 2) - (mw // 2)
+    ry = root.winfo_y() + (root.winfo_height() // 2) - (mh // 2)
+    modal.geometry(f"{mw}x{mh}+{max(0, rx)}+{max(0, ry)}")
+    modal.configure(bg=BG_CARD)
+    modal.transient(root)
+    modal.grab_set()
+    modal.resizable(False, False)
+
+    container = tk.Frame(modal, bg=BG_CARD, padx=24, pady=20)
+    container.pack(fill="both", expand=True)
+
+    # Header
+    tk.Label(
+        container,
+        text="🔄 KONFIRMASI RESTART APLIKASI",
+        font=(fonts["FONT_FAMILY_UI"], 12, "bold"),
+        fg=FG_WHITE,
+        bg=BG_CARD,
+    ).pack(anchor="w")
+
+    tk.Label(
+        container,
+        text="Aplikasi akan memuat ulang proses untuk menerapkan konfigurasi komputasi.",
+        font=(fonts["FONT_FAMILY_UI"], 9),
+        fg=FG_SUB,
+        bg=BG_CARD,
+    ).pack(anchor="w", pady=(3, 14))
+
+    # Mode details card
+    mode_is_gpu = target_mode.upper() == "GPU"
+    accent_fg = COLOR_GREEN if mode_is_gpu else COLOR_SKY
+    accent_bg = COLOR_GREEN_BG if mode_is_gpu else COLOR_SKY_BG
+    accent_border = COLOR_GREEN_BORDER if mode_is_gpu else COLOR_SKY_BORDER
+    mode_title = "⚡ MODE TARGET: GPU (CUDA ACCELERATED)" if mode_is_gpu else "💻 MODE TARGET: CPU (STANDARD)"
+    mode_desc = (
+        "Model STT & TTS akan dijalankan menggunakan akselerasi GPU (CUDA)."
+        if mode_is_gpu
+        else "Model STT & TTS akan dijalankan menggunakan thread CPU bawaan sistem."
+    )
+
+    info_card = tk.Frame(
+        container,
+        bg=BG_CARD_ALT,
+        highlightthickness=1,
+        highlightbackground=BORDER,
+        padx=14,
+        pady=12,
+    )
+    info_card.pack(fill="x", pady=(0, 14))
+
+    # Badge Row
+    badge_row = tk.Frame(info_card, bg=BG_CARD_ALT)
+    badge_row.pack(anchor="w", fill="x")
+
+    badge = tk.Label(
+        badge_row,
+        text=mode_title,
+        font=(fonts["FONT_FAMILY_UI"], 9, "bold"),
+        fg=accent_fg,
+        bg=accent_bg,
+        highlightthickness=1,
+        highlightbackground=accent_border,
+        padx=8,
+        pady=3,
+    )
+    badge.pack(side="left")
+
+    tk.Label(
+        info_card,
+        text=mode_desc,
+        font=(fonts["FONT_FAMILY_UI"], 8),
+        fg=FG_WHITE,
+        bg=BG_CARD_ALT,
+        wraplength=430,
+        justify="left",
+    ).pack(anchor="w", pady=(8, 4))
+
+    tk.Label(
+        info_card,
+        text="ℹ️ Seluruh worker audio aktif akan dihentikan secara aman sebelum proses baru dimulai.",
+        font=(fonts["FONT_FAMILY_UI"], 8),
+        fg=FG_MUTED,
+        bg=BG_CARD_ALT,
+        wraplength=430,
+        justify="left",
+    ).pack(anchor="w")
+
+    # Action Buttons
+    btn_box = tk.Frame(container, bg=BG_CARD)
+    btn_box.pack(fill="x", side="bottom")
+
+    def _do_confirm():
+        modal.destroy()
+        on_confirm()
+
+    btn_cancel = tk.Button(
+        btn_box,
+        text="✕ BATAL",
+        font=(fonts["FONT_FAMILY_UI"], 8, "bold"),
+        fg=FG_SUB,
+        bg=BG_CARD_ALT,
+        activeforeground=FG_WHITE,
+        activebackground=BORDER,
+        relief="flat",
+        borderwidth=0,
+        padx=16,
+        pady=7,
+        cursor="hand2",
+        command=modal.destroy,
+    )
+    btn_cancel.pack(side="right")
+    add_hover_effect(btn_cancel, BG_CARD_ALT, BORDER)
+
+    btn_restart = tk.Button(
+        btn_box,
+        text="🔄 RESTART SEKARANG",
+        font=(fonts["FONT_FAMILY_UI"], 8, "bold"),
+        fg=COLOR_AMBER,
+        bg=COLOR_AMBER_BG,
+        activeforeground=FG_WHITE,
+        activebackground=COLOR_AMBER_BORDER,
+        highlightthickness=1,
+        highlightbackground=COLOR_AMBER_BORDER,
+        relief="flat",
+        borderwidth=0,
+        padx=16,
+        pady=7,
+        cursor="hand2",
+        command=_do_confirm,
+    )
+    btn_restart.pack(side="right", padx=(0, 10))
+    add_hover_effect(btn_restart, COLOR_AMBER_BG, COLOR_AMBER_BORDER, COLOR_AMBER_BORDER, COLOR_AMBER)
+
+    modal.bind("<Escape>", lambda e: modal.destroy())
+    modal.bind("<Return>", lambda e: _do_confirm())

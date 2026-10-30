@@ -93,28 +93,17 @@ class HardwareMonitor:
             "active": "CPU",
         }
         try:
-            from audio import stt
-            # Periksa provider di modul stt
-            with open(stt.__file__, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-                if 'provider="cuda"' in content:
-                    providers["stt"] = "cuda"
+            from audio.provider import get_stt_provider, get_tts_provider
+            stt_p = get_stt_provider()
+            tts_p = get_tts_provider()
+            providers["stt"] = stt_p
+            providers["tts"] = tts_p
+            if stt_p == "cuda" or tts_p == "cuda":
+                providers["active"] = "GPU (CUDA)"
+            else:
+                providers["active"] = "CPU"
         except Exception:
             pass
-
-        try:
-            from audio import tts
-            with open(tts.__file__, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-                if 'provider="cuda"' in content:
-                    providers["tts"] = "cuda"
-        except Exception:
-            pass
-
-        if providers["stt"] == "cuda" or providers["tts"] == "cuda":
-            providers["active"] = "GPU (CUDA)"
-        else:
-            providers["active"] = "CPU"
 
         return providers
 
@@ -225,6 +214,8 @@ class HardwareMonitor:
         temps = self.get_temperatures()
         mem = self.get_memory_info()
 
+        # Update dynamic providers
+        self.providers = self._detect_configured_providers()
         is_cuda = self.providers["active"] == "GPU (CUDA)"
 
         return {
@@ -293,12 +284,13 @@ def run_live_monitor_cli(interval: float = 0.8):
 
             # Bersihkan terminal dan tampilkan kartu dashboard
             sys.stdout.write("\033[H\033[J")
+            accel_label = f"● {snap['active_accelerator']} (CUDA {snap['cuda_version'] or '12.6'})" if snap['is_cuda'] else f"● {snap['active_accelerator']} (Standard)"
             sys.stdout.write(f"""{CLR_CYAN}╭────────────────────────────────────────────────────────────────────────╮
 │   {CLR_WHITE}⚡  L I V E   H A R D W A R E   C O M P U T E   M O N I T O R{CLR_CYAN}        │
 │   {CLR_MUTED}Real-time Accelerator Telemetry (GPU vs CPU Profile){CLR_CYAN}                 │
 ├────────────────────────────────────────────────────────────────────────┤
 │  {CLR_WHITE}Board / Model :{CLR_RESET} {snap['device_model'][:50]:<53}{CLR_CYAN}│
-│  {CLR_WHITE}Akselerator   :{CLR_RESET} {CLR_GREEN}● {snap['active_accelerator']}{CLR_RESET} (CUDA {snap['cuda_version'] or '12.6'}){'':<32}{CLR_CYAN}│
+│  {CLR_WHITE}Akselerator   :{CLR_RESET} {CLR_GREEN}{accel_label:<53}{CLR_CYAN}│
 │  {CLR_WHITE}Engine STT    :{CLR_RESET} Sherpa-ONNX Zipformer [{CLR_GREEN}{snap['stt_provider'].upper()}{CLR_RESET}]{'':<26}{CLR_CYAN}│
 │  {CLR_WHITE}Engine TTS    :{CLR_RESET} Sherpa-ONNX Piper VITS [{CLR_GREEN}{snap['tts_provider'].upper()}{CLR_RESET}]{'':<26}{CLR_CYAN}│
 ├────────────────────────────────────────────────────────────────────────┤

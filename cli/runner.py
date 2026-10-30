@@ -121,6 +121,9 @@ def print_menu_card():
 │   {CLR_YELLOW}[6]{CLR_RESET}  {CLR_WHITE}📊  Monitor Hardware (GPU vs CPU Live){CLR_RESET} {CLR_MUTED}(Tegra/CUDA){CLR_CYAN}        │
 │        {CLR_MUTED}Pantau utilisasi real-time GPU (GR3D), CPU, dan suhu{CLR_CYAN}             │
 │                                                                      │
+│   {CLR_YELLOW}[7]{CLR_RESET}  {CLR_WHITE}⚙️   Pilih Mode Komputasi (GPU ↔ CPU){CLR_RESET} {CLR_MUTED}(Ganti Engine){CLR_CYAN}         │
+│        {CLR_MUTED}Ubah akselerasi inference & opsi restart aplikasi{CLR_CYAN}          │
+│                                                                      │
 │   {CLR_RED}[q]{CLR_RESET}  {CLR_WHITE}🚪  Keluar dari Aplikasi{CLR_RESET} {CLR_MUTED}(Exit){CLR_CYAN}                               │
 │                                                                      │
 ╰──────────────────────────────────────────────────────────────────────╯{CLR_RESET}""")
@@ -546,6 +549,49 @@ def run_task_cli(duration: int = 5, device: Optional[int] = None, ros2_host: Opt
         print(f"\n{CLR_MUTED}[INFO] Mode tugas dibatalkan oleh pengguna.{CLR_RESET}\n")
 
 
+def configure_compute_mode_cli():
+    """Menu CLI interaktif untuk mengubah preferensi engine komputasi (GPU vs CPU)."""
+    from audio.provider import is_cuda_available, load_compute_mode, save_compute_mode, restart_current_process
+    cuda_avail = is_cuda_available()
+    cur_mode = load_compute_mode()
+
+    gpu_status = f"{CLR_GREEN}Tersedia (NVIDIA CUDA){CLR_RESET}" if cuda_avail else f"{CLR_RED}Tidak Terdeteksi (CPU Only){CLR_RESET}"
+    mode_str = f"{CLR_GREEN}GPU (CUDA){CLR_RESET}" if cur_mode == "gpu" else f"{CLR_SKY}CPU (Standard){CLR_RESET}"
+
+    print(f"\n{CLR_CYAN}╭─── ⚙️ PENGATURAN MODE AKSELERASI KOMPUTASI ─────────────────────────╮")
+    print(f"│  Hardware GPU CUDA : {gpu_status:<48}{CLR_CYAN}│")
+    print(f"│  Mode Aktif Saat Ini: {mode_str:<47}{CLR_CYAN}│")
+    print(f"│                                                                      │")
+    print(f"│   {CLR_YELLOW}[1]{CLR_RESET}  Aktifkan Mode GPU (CUDA) - Akselerasi Maksimum                {CLR_CYAN}│")
+    print(f"│   {CLR_YELLOW}[2]{CLR_RESET}  Aktifkan Mode CPU - Mode Hemat Daya / Standard CPU            {CLR_CYAN}│")
+    print(f"│   {CLR_YELLOW}[3]{CLR_RESET}  🔄 Restart Aplikasi Sekarang                                  {CLR_CYAN}│")
+    print(f"│   {CLR_RED}[b]{CLR_RESET}  Kembali ke Menu Utama                                         {CLR_CYAN}│")
+    print(f"╰──────────────────────────────────────────────────────────────────────╯{CLR_RESET}")
+
+    try:
+        sub = input(f"   {CLR_CYAN}❯{CLR_RESET} {CLR_BOLD}Pilihan Anda [1/2/3/b]:{CLR_RESET} ").strip().lower()
+        if sub == "1":
+            if not cuda_avail:
+                print(f"\n  {CLR_RED}⚠️ GPU/CUDA tidak terdeteksi pada perangkat ini. Tetap menggunakan mode CPU.{CLR_RESET}")
+                return
+            save_compute_mode("gpu")
+            print(f"\n  {CLR_GREEN}✓ Preferensi mode komputasi diubah ke: GPU (CUDA){CLR_RESET}")
+            ask = input(f"  {CLR_YELLOW}❯ Restart aplikasi sekarang untuk menerapkan? [y/N]:{CLR_RESET} ").strip().lower()
+            if ask in ("y", "yes"):
+                restart_current_process()
+        elif sub == "2":
+            save_compute_mode("cpu")
+            print(f"\n  {CLR_GREEN}✓ Preferensi mode komputasi diubah ke: CPU{CLR_RESET}")
+            ask = input(f"  {CLR_YELLOW}❯ Restart aplikasi sekarang untuk menerapkan? [y/N]:{CLR_RESET} ").strip().lower()
+            if ask in ("y", "yes"):
+                restart_current_process()
+        elif sub == "3":
+            print(f"\n  {CLR_CYAN}🔄 Merestart aplikasi...{CLR_RESET}")
+            restart_current_process()
+    except (KeyboardInterrupt, EOFError):
+        pass
+
+
 def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):
     """Menu CLI interaktif untuk terminal headless / Ubuntu Server."""
     print_banner(ros2_host=ros2_host, ros2_port=ros2_port)
@@ -559,7 +605,7 @@ def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_ho
     while True:
         print_menu_card()
         try:
-            choice = input(f"   {CLR_CYAN}❯{CLR_RESET} {CLR_BOLD}Pilih menu [1/2/3/4/5/6/q]:{CLR_RESET} ").strip().lower()
+            choice = input(f"   {CLR_CYAN}❯{CLR_RESET} {CLR_BOLD}Pilih menu [1/2/3/4/5/6/7/q]:{CLR_RESET} ").strip().lower()
         except (KeyboardInterrupt, EOFError):
             print(f"\n{CLR_MUTED}Keluar dari program...{CLR_RESET}\n")
             break
@@ -584,11 +630,13 @@ def run_cli_interactive(duration: int = 5, device: Optional[int] = None, ros2_ho
         elif choice == "6":
             from hw_monitor import run_live_monitor_cli
             run_live_monitor_cli()
+        elif choice == "7":
+            configure_compute_mode_cli()
         elif choice in ["q", "quit", "exit"]:
             print(f"\n  {CLR_GREEN}✓ Keluar dari program. Sampai jumpa!{CLR_RESET}\n")
             break
         else:
-            print(f"\n  {CLR_RED}[!] Pilihan tidak valid, silakan ketik nomor 1-6 atau q.{CLR_RESET}")
+            print(f"\n  {CLR_RED}[!] Pilihan tidak valid, silakan ketik nomor 1-7 atau q.{CLR_RESET}")
 
 
 def run_text_mode(text: str, ros2_host: Optional[str] = None, ros2_port: Optional[int] = None):

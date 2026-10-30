@@ -52,7 +52,7 @@ from gui.theme import (
     get_theme_fonts,
     add_hover_effect,
 )
-from gui.modals import open_devices_modal, open_ros2_config_modal
+from gui.modals import open_devices_modal, open_ros2_config_modal, open_restart_confirm_modal
 from gui.user_view import UserView
 from gui.admin_view import AdminView
 
@@ -351,6 +351,45 @@ class RobotGUIApp:
 
     def open_ros2_dialog(self):
         open_ros2_config_modal(self.root, self.pipeline, self.fonts, self.ui_call, self.on_ros2_endpoint_updated)
+
+    def set_compute_mode(self, mode: str):
+        """Ubah preferensi mode akselerasi komputasi (GPU vs CPU)."""
+        from audio.provider import save_compute_mode, is_cuda_available
+        if mode == "gpu" and not is_cuda_available():
+            self.append_dialog_history("⚙️ Sistem", "⚠️ Hardware / pustaka CUDA tidak terdeteksi pada perangkat ini.", COLOR_AMBER)
+            self.admin_view.update_compute_mode_ui("cpu", status_msg="⚠️ GPU tidak tersedia, tetap CPU")
+            return
+
+        save_compute_mode(mode)
+        mode_label = "GPU (CUDA)" if mode == "gpu" else "CPU (Standard)"
+        self.admin_view.update_compute_mode_ui(mode, status_msg=f"Mode diatur ke {mode_label}. Klik Restart untuk terapkan.")
+        self.append_dialog_history(
+            "⚙️ Sistem",
+            f"Mode akselerasi diatur ke {mode_label}. Klik tombol [🔄 Restart Aplikasi] untuk menerapkan perubahan.",
+            COLOR_AMBER,
+        )
+
+    def on_restart_app_clicked(self):
+        """Konfirmasi dan restart aplikasi untuk menerapkan mode baru menggunakan modal kustom."""
+        from audio.provider import load_compute_mode
+        cur_mode = load_compute_mode().upper()
+        open_restart_confirm_modal(
+            root=self.root,
+            fonts=self.fonts,
+            target_mode=cur_mode,
+            on_confirm=self.restart_application,
+        )
+
+    def restart_application(self):
+        """Restart proses aplikasi secara bersih."""
+        try:
+            if hasattr(self, "audio_worker") and self.audio_worker is not None:
+                self.audio_worker.stop()
+        except Exception:
+            pass
+
+        from audio.provider import restart_current_process
+        restart_current_process(self.root)
 
     def on_ros2_endpoint_updated(self, host: str, port: int):
         new_target = f"{host}:{port}"

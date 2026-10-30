@@ -23,12 +23,18 @@ def get_effective_input_device(device: Optional[int] = None) -> Optional[int]:
     if device is not None:
         return device
 
-    if DEFAULT_MIC_DEVICE is not None:
-        return DEFAULT_MIC_DEVICE
-
     try:
         import sounddevice as sd
         devices = sd.query_devices()
+
+        if DEFAULT_MIC_DEVICE is not None:
+            if 0 <= DEFAULT_MIC_DEVICE < len(devices) and devices[DEFAULT_MIC_DEVICE].get("max_input_channels", 0) > 0:
+                return DEFAULT_MIC_DEVICE
+            logger.warning(
+                f"[AUDIO] DEFAULT_MIC_DEVICE={DEFAULT_MIC_DEVICE} tidak valid atau tidak memiliki channel input. "
+                "Beralih ke deteksi otomatis."
+            )
+
         default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else -1
         if 0 <= default_in < len(devices) and devices[default_in].get("max_input_channels", 0) > 0:
             return default_in

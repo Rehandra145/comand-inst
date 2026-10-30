@@ -459,6 +459,7 @@ Dirancang khusus untuk pasien dan pengunjung rumah sakit:
 
 ### 6.2 Mode Teknisi (Control Center / Dashboard)
 Dirancang untuk teknisi, administrator, dan integrasi robotik:
+- **Pengalih & Konfigurasi Mode Komputasi (GPU vs CPU)**: Tombol interaktif untuk beralih antara akselerasi hardware `⚡ GPU (CUDA)` dan `💻 CPU (Standard)` dengan status persistensi ke `compute_config.json`. Dilengkapi **Modal Konfirmasi Restart** modern bertema Dark Studio untuk menerapkan perubahan secara aman.
 - **Monitor Akselerasi Komputasi (GPU vs CPU)**: Panel visual interaktif yang menampilkan identitas chip hardware (misal *NVIDIA Jetson Orin Nano*), status execution provider STT & TTS, utilisasi memori RAM, sensor suhu, serta *progress bar* real-time utilisasi engine **GPU (GR3D)** dan **CPU**.
 - **Telemetri NLU Real-Time**: Menampilkan live transkripsi STT, Intent terdeteksi beserta confidence score, parameter slots, dan status validasi.
 - **Monitor Transmisi Payload Node ROS 2**: Indikator visual real-time status pengiriman JSON payload ke Socket TCP ROS 2 (`● TERKIRIM ✓`, `✕ GAGAL KIRIM`, `⏸ DITAHAN`).
@@ -483,6 +484,7 @@ command-inst/
 │
 ├── audio/                      # Audio & Speech Processing Layer
 │   ├── __init__.py             # Ekspor utilitas audio
+│   ├── provider.py             # Manajemen provider komputasi (GPU vs CPU), deteksi CUDA & restart
 │   ├── stt.py                  # Engine STT Sherpa-ONNX streaming Zipformer RNN-T
 │   ├── tts.py                  # Engine TTS offline Piper VITS, 2-level disk cache, chime cue
 │   ├── scheduler.py            # Hardware scheduling, thread priority, & mutual exclusion
@@ -529,12 +531,14 @@ command-inst/
 - Perangkat mikrofon yang terhubung (USB / I2S / Array mic)
 - Speaker / Jack audio 3.5mm / HDMI (untuk audio respons robot)
 
-#### Dukungan Akselerasi Komputasi:
+#### Dukungan Akselerasi Komputasi & Portabilitas Multi-Platform:
 - **NVIDIA Jetson (Orin Nano / Orin NX / AGX / Xavier) & GPU CUDA**:
   - Menggunakan paket `sherpa-onnx` dengan varian `+cuda` (`provider="cuda"`).
   - Memanfaatkan *Unified Memory Architecture* (UMA) Jetson untuk inferensi streaming STT dan sintesis TTS dengan latensi ultra-rendah tanpa beban CPU tinggi.
-- **CPU Multi-Core (Raspberry Pi 4 / PC x86_64 / ARM64 Standar)**:
-  - Menggunakan ONNX Runtime CPU dengan model terkuantisasi INT8 (`encoder.int8.onnx`, `joiner.int8.onnx`) dan alokasi multi-thread yang optimal.
+- **CPU Multi-Core & Fallback Multi-Platform (Laptop/PC x86_64, Windows, macOS, Raspberry Pi)**:
+  - Menggunakan ONNX Runtime CPU dengan model terkuantisasi INT8 (`encoder.int8.onnx`, `joiner.int8.onnx`) dan alokasi multi-thread optimal.
+  - **Auto-Fallback Cerdas**: Jika hardware GPU atau pustaka CUDA tidak terdeteksi (seperti saat proyek di-clone di laptop lain tanpa GPU), sistem secara mulus beralih ke mode CPU tanpa crash.
+  - **Pustaka Universal**: Dependensi dikonfigurasi melalui universal wheels, tidak lagi bergantung pada hardcoded local path, sehingga dapat langsung di-pull dan diinstal di berbagai mesin.
 
 ---
 
@@ -604,6 +608,7 @@ Pilihan menu:
 - `[4]` List Seluruh Perangkat Input Audio
 - `[5]` Tes Diagnosa & Level Volume Mikrofon (RMS & Peak)
 - `[6]` Monitor Hardware (GPU vs CPU Live Telemetry) (Tegra/CUDA)
+- `[7]` Konfigurasi Mode Komputasi (GPU CUDA vs CPU)
 - `[q]` Keluar
 
 #### 4. Mode Tugas Dialog Interaktif (Terminal CLI):

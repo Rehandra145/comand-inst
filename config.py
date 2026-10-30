@@ -13,8 +13,8 @@ STT_RATE = 16000
 NUM_THREADS = 3
 
 # Index default perangkat mikrofon (None = otomatis deteksi perangkat input aktif)
-# Bisa diisi angka ID spesifik (misal: DEFAULT_MIC_DEVICE = 0 atau 2)
-DEFAULT_MIC_DEVICE = 24
+# Bisa diisi angka ID spesifik jika diinginkan (misal: DEFAULT_MIC_DEVICE = 0 atau 2)
+DEFAULT_MIC_DEVICE = None
 
 # Default ROS 2 TCP Socket Node Target
 DEFAULT_ROS2_HOST = "10.107.245.221"

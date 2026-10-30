@@ -16,7 +16,11 @@ from gui.theme import (
     COLOR_PRIMARY,
     COLOR_PRIMARY_BORDER,
     COLOR_GREEN,
+    COLOR_GREEN_BG,
+    COLOR_GREEN_BORDER,
     COLOR_AMBER,
+    COLOR_AMBER_BG,
+    COLOR_AMBER_BORDER,
     COLOR_SKY,
     COLOR_SKY_BG,
     COLOR_SKY_BORDER,
@@ -322,6 +326,91 @@ class AdminView:
             highlightbackground=BORDER,
         )
         self.hw_mem_label.pack(side="right")
+
+        # Mode selector & Restart control bar
+        hw_control_bar = tk.Frame(hw_card, bg=BG_CARD_ALT, padx=10, pady=5, highlightthickness=1, highlightbackground=BORDER)
+        hw_control_bar.pack(fill="x", pady=(0, 6))
+
+        ctrl_left = tk.Frame(hw_control_bar, bg=BG_CARD_ALT)
+        ctrl_left.pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            ctrl_left,
+            text="⚙️ PILIH AKSELERASI:",
+            font=(fonts["FONT_FAMILY_UI"], 8, "bold"),
+            fg=FG_SUB,
+            bg=BG_CARD_ALT,
+        ).pack(side="left", padx=(0, 8))
+
+        from audio.provider import is_cuda_available, load_compute_mode
+        self.cuda_supported = is_cuda_available()
+        current_mode = load_compute_mode()
+
+        # Tombol Mode GPU (CUDA)
+        gpu_btn_text = "⚡ GPU (CUDA)" if self.cuda_supported else "⚡ GPU (No CUDA)"
+        self.btn_mode_gpu = tk.Button(
+            ctrl_left,
+            text=gpu_btn_text,
+            font=(fonts["FONT_FAMILY_UI"], 8, "bold"),
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2" if self.cuda_supported else "arrow",
+            padx=10,
+            pady=3,
+            state="normal" if self.cuda_supported else "disabled",
+            command=lambda: self.controller.set_compute_mode("gpu"),
+        )
+        self.btn_mode_gpu.pack(side="left", padx=(0, 6))
+
+        # Tombol Mode CPU
+        self.btn_mode_cpu = tk.Button(
+            ctrl_left,
+            text="💻 CPU",
+            font=(fonts["FONT_FAMILY_UI"], 8, "bold"),
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            padx=10,
+            pady=3,
+            command=lambda: self.controller.set_compute_mode("cpu"),
+        )
+        self.btn_mode_cpu.pack(side="left", padx=(0, 10))
+
+        # Status mode label
+        self.hw_mode_status_label = tk.Label(
+            ctrl_left,
+            text="Default: GPU" if self.cuda_supported else "Mode: CPU (No GPU)",
+            font=(fonts["FONT_FAMILY_UI"], 8),
+            fg=FG_MUTED,
+            bg=BG_CARD_ALT,
+        )
+        self.hw_mode_status_label.pack(side="left")
+
+        # Tombol Restart Aplikasi
+        ctrl_right = tk.Frame(hw_control_bar, bg=BG_CARD_ALT)
+        ctrl_right.pack(side="right")
+
+        self.btn_restart_app = tk.Button(
+            ctrl_right,
+            text="🔄 Restart Aplikasi",
+            font=(fonts["FONT_FAMILY_UI"], 8, "bold"),
+            fg=COLOR_AMBER,
+            bg=BG_CARD,
+            activeforeground=FG_WHITE,
+            activebackground=COLOR_AMBER_BG,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLOR_AMBER_BORDER,
+            cursor="hand2",
+            padx=10,
+            pady=3,
+            command=self.controller.on_restart_app_clicked,
+        )
+        self.btn_restart_app.pack(side="right")
+        add_hover_effect(self.btn_restart_app, BG_CARD, COLOR_AMBER_BG, COLOR_AMBER_BORDER, COLOR_AMBER)
+
+        self.update_compute_mode_ui(current_mode)
 
         # Live meters row: GPU (GR3D) & CPU
         meters_row = tk.Frame(hw_card, bg=BG_CARD_ALT, padx=10, pady=6, highlightthickness=1, highlightbackground=BORDER)
@@ -666,3 +755,41 @@ class AdminView:
                 self.cpu_bar_canvas.create_rectangle(0, 0, c_fill, 6, fill=COLOR_SKY, width=0)
         except Exception:
             pass
+
+    def update_compute_mode_ui(self, active_mode: str, status_msg: str = None):
+        """Update styling tombol pemilih mode komputasi GPU vs CPU."""
+        is_gpu = active_mode in ("gpu", "cuda")
+        if is_gpu and self.cuda_supported:
+            self.btn_mode_gpu.config(
+                bg=COLOR_GREEN_BG,
+                fg=COLOR_GREEN,
+                highlightthickness=1,
+                highlightbackground=COLOR_GREEN_BORDER,
+            )
+            self.btn_mode_cpu.config(
+                bg=BG_CARD,
+                fg=FG_MUTED,
+                highlightthickness=1,
+                highlightbackground=BORDER,
+            )
+            if status_msg:
+                self.hw_mode_status_label.config(text=status_msg, fg=COLOR_GREEN)
+            else:
+                self.hw_mode_status_label.config(text="● Mode aktif: GPU (CUDA)", fg=COLOR_GREEN)
+        else:
+            self.btn_mode_gpu.config(
+                bg=BG_CARD,
+                fg=FG_MUTED,
+                highlightthickness=1,
+                highlightbackground=BORDER,
+            )
+            self.btn_mode_cpu.config(
+                bg=COLOR_SKY_BG,
+                fg=COLOR_SKY,
+                highlightthickness=1,
+                highlightbackground=COLOR_SKY_BORDER,
+            )
+            if status_msg:
+                self.hw_mode_status_label.config(text=status_msg, fg=COLOR_SKY)
+            else:
+                self.hw_mode_status_label.config(text="● Mode aktif: CPU (Standard)", fg=COLOR_SKY)

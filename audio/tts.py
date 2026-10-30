@@ -28,6 +28,8 @@ except ImportError:
     scheduler = None
     set_thread_high_priority = lambda: None
 
+from audio.provider import get_preferred_provider, set_tts_provider, get_tts_provider
+
 logger = logging.getLogger(__name__)
 
 # Base root directory resolver
@@ -191,14 +193,14 @@ def _make_gen_config(
     return config
 
 
-def _get_tts_engine():
+def _get_tts_engine(force_provider: Optional[str] = None):
     """Lazy-load TTS engine sekali saat pertama dipakai (thread-safe singleton)."""
     global _tts_engine
-    if _tts_engine is not None:
+    if _tts_engine is not None and force_provider is None:
         return _tts_engine
 
     with _tts_lock:
-        if _tts_engine is not None:
+        if _tts_engine is not None and force_provider is None:
             return _tts_engine
 
         from audio.scheduler import model_init_lock
@@ -221,27 +223,63 @@ def _get_tts_engine():
 
             logger.info(f"[TTS] Loading model dari '{TTS_MODEL_DIR}'...")
 
-            tts_config = sherpa_onnx.OfflineTtsConfig(
-                model=sherpa_onnx.OfflineTtsModelConfig(
-                    vits=sherpa_onnx.OfflineTtsVitsModelConfig(
-                        model=str(model_path),
-                        tokens=str(tokens_path),
-                        # data_dir (espeak-ng-data) dihapus: deprecated sejak sherpa-onnx v2.0.0.
-                        # Fonemi kini dihasilkan oleh piper_phonemize dan dikirim via
-                        # GenerationConfig.phoneme_codepoints.
+            preferred = force_provider or get_preferred_provider()
+            engine = None
+
+            if preferred == "cuda":
+                try:
+                    logger.info("[TTS] Mencoba inisialisasi model TTS dengan GPU (CUDA)...")
+                    tts_config = sherpa_onnx.OfflineTtsConfig(
+                        model=sherpa_onnx.OfflineTtsModelConfig(
+                            vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                                model=str(model_path),
+                                tokens=str(tokens_path),
+                            ),
+                            num_threads=TTS_NUM_THREADS,
+                            provider="cuda",
+                        ),
+                    )
+                    if tts_config.validate():
+                        engine = sherpa_onnx.OfflineTts(tts_config)
+                        set_tts_provider("cuda")
+                        logger.info("[TTS] Engine TTS berhasil diinisialisasi (GPU CUDA)")
+                except Exception as e:
+                    logger.warning(f"[TTS] Inisialisasi GPU (CUDA) gagal ({e}), otomatis fallback ke CPU...")
+                    engine = None
+
+            if engine is None:
+                tts_config = sherpa_onnx.OfflineTtsConfig(
+                    model=sherpa_onnx.OfflineTtsModelConfig(
+                        vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                            model=str(model_path),
+                            tokens=str(tokens_path),
+                        ),
+                        num_threads=TTS_NUM_THREADS,
+                        provider="cpu",
                     ),
-                    num_threads=TTS_NUM_THREADS,
-                    provider="cuda",
-                ),
-            )
+                )
+                if not tts_config.validate():
+                    logger.error("[TTS] Konfigurasi model TTS tidak valid! Periksa path model.")
+                    return None
+                engine = sherpa_onnx.OfflineTts(tts_config)
+                set_tts_provider("cpu")
+                logger.info("[TTS] Engine TTS berhasil diinisialisasi (CPU)")
 
-            if not tts_config.validate():
-                logger.error("[TTS] Konfigurasi model TTS tidak valid! Periksa path model.")
-                return None
-
-            _tts_engine = sherpa_onnx.OfflineTts(tts_config)
-            logger.info("[TTS] Engine berhasil diinisialisasi (offline Piper VITS id_ID)")
+            _tts_engine = engine
             return _tts_engine
+
+
+def get_active_provider() -> str:
+    """Ambil status execution provider aktif pada modul TTS ('cuda' atau 'cpu')."""
+    return get_tts_provider()
+
+
+def reload_engine(provider: Optional[str] = None):
+    """Reload instance TTS engine dengan provider tertentu (thread-safe)."""
+    global _tts_engine
+    with _tts_lock:
+        _tts_engine = None
+        return _get_tts_engine(force_provider=provider)
 
 
 # =========================
