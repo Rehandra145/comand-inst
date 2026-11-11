@@ -20,6 +20,7 @@ dependencies = [
 
 [tool.uv]
 package = false
+offline = true
 find-links = [
     "https://k2-fsa.github.io/sherpa/onnx/cuda.html",
 ]

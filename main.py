@@ -156,12 +156,50 @@ if __name__ == "__main__":
         help="Tampilkan live dashboard telemetri utilisasi GPU (Tegra) vs CPU di terminal.",
     )
 
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Jalankan antarmuka Web Dashboard lokal & REST/WebSocket API.",
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Nomor port untuk Web Server (default: 8000).",
+    )
+
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host address untuk Web Server (default: 0.0.0.0 agar bisa diakses di jaringan lokal).",
+    )
+
+    parser.add_argument(
+        "--ssl",
+        action="store_true",
+        help="Aktifkan HTTPS/WSS (self-signed cert) agar browser mic HP/laptop bisa dipakai dari jaringan lokal.",
+    )
+
     args = parser.parse_args()
 
     # 0. Live hardware compute monitor via terminal
     if args.monitor:
         from hw_monitor import run_live_monitor_cli
         run_live_monitor_cli()
+        sys.exit(0)
+
+    # 0.0 Web Interface & API Mode
+    if args.web:
+        from web import run_web_server
+        run_web_server(
+            host=args.host,
+            port=args.port,
+            ros2_host=args.ros2_host,
+            ros2_port=args.ros2_port,
+            ssl=args.ssl,
+        )
         sys.exit(0)
 
     # 0.1 Task dialog mode via terminal
