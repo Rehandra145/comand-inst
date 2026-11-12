@@ -124,7 +124,8 @@ _SORTED_OBJECTS: Tuple[str, ...] = tuple(
 _OBJECT_ORIGINALS = {o.lower(): o for o in OBJECTS}
 
 # Pre-compiled regex patterns (support phonetic STT errors like "ruas" / "ruan" for "ruang")
-_RE_ROOM_PREFIX = re.compile(r'\b(ruang(?:an)?|ruas|ruan)\s+(.+)')
+# "lorong" ditambahkan sebagai prefix lokasi selain "ruang"
+_RE_ROOM_PREFIX = re.compile(r'\b(ruang(?:an)?|ruas|ruan|lorong)\s+(.+)')
 _RE_ROOM_DIGITS = re.compile(r'^(\d+)\b')
 _RE_DISTANCE_NUM = re.compile(r'(\d+(?:\.\d+)?)\s*(meter|langkah|m)\b')
 
@@ -244,18 +245,27 @@ class RuleBasedSlotExtractor(BaseSlotExtractor):
 
         Digit mode:  "satu nol empat" → "ruang 104"
         Compound:    "dua ratus tiga" → "ruang 203"
+        Lorong:      "lorong 1"       → "lorong 1"
+                     "lorong satu"    → "lorong 1"
         """
 
         match = _RE_ROOM_PREFIX.search(text)
         if not match:
             return {}
 
+        # Tentukan prefix yang dipakai agar "lorong" tetap "lorong", bukan "ruang"
+        prefix_word = match.group(1).strip()
+        if prefix_word == "lorong":
+            location_prefix = "lorong"
+        else:
+            location_prefix = "ruang"
+
         rest = match.group(2).strip()
 
         # Case 1: Already numeric
         num_match = _RE_ROOM_DIGITS.match(rest)
         if num_match:
-            return {"location": f"ruang {num_match.group(1)}"}
+            return {"location": f"{location_prefix} {num_match.group(1)}"}
 
         # Case 2: Parse number words
         words = rest.split()
@@ -290,7 +300,7 @@ class RuleBasedSlotExtractor(BaseSlotExtractor):
             result = 0
             for w in num_words:
                 result = result * 10 + _ANGKA[w]
-            return {"location": f"ruang {result}"}
+            return {"location": f"{location_prefix} {result}"}
 
         elif has_compound:
             # Compound mode
@@ -317,7 +327,7 @@ class RuleBasedSlotExtractor(BaseSlotExtractor):
 
             result += current
             if result > 0:
-                return {"location": f"ruang {result}"}
+                return {"location": f"{location_prefix} {result}"}
 
         return {}
 

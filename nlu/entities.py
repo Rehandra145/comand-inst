@@ -105,6 +105,12 @@ LOCATION_ALIASES = {
     "ruas empat": "ruang 4",
     "ruas 5": "ruang 5",
     "ruas lima": "ruang 5",
+    # Lorong dengan kata angka -> lorong dengan digit
+    "lorong satu": "lorong 1",
+    "lorong dua": "lorong 2",
+    "lorong tiga": "lorong 3",
+    "lorong empat": "lorong 4",
+    "lorong lima": "lorong 5",
 }
 
 
