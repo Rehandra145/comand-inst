@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#12110f">
+  <title>Robot Voice Command</title>
+  <link rel="stylesheet" href="/css/style.css?v=3">
+  <script src="/js/app.js?v=3"></script>
+  <script defer src="/vendor/alpine.min.js"></script>
+</head>
+<body x-data="zenVoiceSystem" x-cloak>
+
+  <!-- TOP: status saja -->
+  <header class="top-bar">
+    <div class="status">
+      <span class="status-dot" :class="{
+        'listening': state === 'LISTENING',
+        'processing': state === 'PROCESSING' || state === 'SPEAKING',
+        'offline': !connected
+      }"></span>
+      <span x-text="statusLabel"></span>
+    </div>
+    <button class="btn-icon" @click="showDrawer = true" aria-label="Pengaturan">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+    </button>
+  </header>
+
+  <!-- CENTER: satu tombol mic -->
+  <main class="hero-stage">
+    <div class="mic-orb-wrapper">
+      <canvas id="waveCanvas"></canvas>
+      <button
+        type="button"
+        class="mic-orb-btn"
+        :class="{ 'active': state === 'LISTENING', 'busy': state === 'PROCESSING' || state === 'SPEAKING', 'starting': starting }"
+        @click="toggleMic()"
+        aria-label="Sentuh untuk bicara"
+      >
+        <svg x-show="state !== 'LISTENING'" viewBox="0 0 24 24">
+          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="22"></line>
+        </svg>
+        <svg x-show="state === 'LISTENING'" viewBox="0 0 24 24" class="stop-icon">
+          <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+        </svg>
+      </button>
+    </div>
+
+    <h2 class="action-caption" x-text="caption"></h2>
+
+    <!-- Sumber mic: HP ini / Robot -->
+    <div class="segmented" x-show="state === 'IDLE'">
+      <button type="button" :class="{ on: micSource === 'browser' }" :disabled="!browserMicSupported"
+              @click="setMicSource('browser')">Mic perangkat ini</button>
+      <button type="button" :class="{ on: micSource === 'jetson' }"
+              @click="setMicSource('jetson')">Mic robot</button>
+    </div>
+    <p class="hint" x-show="hint" x-text="hint"></p>
+
+    <!-- Transkrip & respons -->
+    <p class="live-speech-quote" x-show="partialTranscript" x-text="'“' + partialTranscript + '”'"></p>
+    <div class="robot-response" x-show="robotResponse">
+      <span class="intent-tag" x-show="lastNlu && lastNlu.intent" x-text="lastNlu ? lastNlu.intent : ''"></span>
+      <p x-text="robotResponse"></p>
+    </div>
+  </main>
+
+  <!-- BOTTOM: toggle perintah cepat & ketik -->
+  <footer class="bottom-bar">
+    <div class="panel" x-show="panel === 'quick'" x-transition.opacity>
+      <div class="chips">
+        <template x-for="q in quickCommands" :key="q.label">
+          <button type="button" class="chip" @click="sendTextCommand(q.text); panel = null" x-text="q.label"></button>
+        </template>
+      </div>
+    </div>
+
+    <form class="panel input-pill" x-show="panel === 'type'" x-transition.opacity @submit.prevent="submitText()">
+      <input type="text" x-ref="textField" x-model="textInput" placeholder="Ketik perintah..." autocomplete="off" enterkeyhint="send">
+      <button type="submit" class="btn-send" aria-label="Kirim">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </button>
+    </form>
+
+    <div class="toggles">
+      <button type="button" class="toggle" :class="{ on: panel === 'quick' }" @click="togglePanel('quick')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Perintah cepat
+      </button>
+      <button type="button" class="toggle" :class="{ on: panel === 'type' }" @click="togglePanel('type')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="7" y1="14" x2="17" y2="14"/></svg>
+        Ketik
+      </button>
+    </div>
+  </footer>
+
+  <!-- DRAWER: detail teknis -->
+  <div class="drawer-backdrop" x-show="showDrawer" x-transition.opacity @click.self="showDrawer = false">
+    <div class="drawer-panel">
+      <div class="drawer-header">
+        <h3 class="drawer-title">Pengaturan</h3>
+        <button class="btn-icon" @click="showDrawer = false" aria-label="Tutup">✕</button>
+      </div>
+
+      <div class="detail-row">
+        <div>
+          <div>Mode ROS 2</div>
+          <div class="muted">Simulasi jika robot belum terhubung</div>
+        </div>
+        <button class="chip on" @click="toggleRos2Mode()" x-text="ros2.mode === 'mock' ? 'Simulasi' : 'Robot fisik'"></button>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Koneksi</span>
+        <span class="detail-val" x-text="connected ? (isHttps ? 'WSS (aman)' : 'WS') : 'Terputus'"></span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Perangkat</span>
+        <span class="detail-val" x-text="telemetry.device_model"></span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Inferensi</span>
+        <span class="detail-val" x-text="telemetry.active_accelerator"></span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">CPU / GPU</span>
+        <span class="detail-val" x-text="(telemetry.cpu_load || 0).toFixed(0) + '% / ' + (telemetry.gpu_load || 0).toFixed(0) + '%'"></span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">RAM</span>
+        <span class="detail-val" x-text="telemetry.ram_used_mb + ' / ' + telemetry.ram_total_mb + ' MB'"></span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Pulihkan sistem</span>
+        <button class="chip" @click="forceReset(); showDrawer = false">Reset</button>
+      </div>
+
+      <div x-show="lastNlu">
+        <div class="muted" style="margin-bottom:.35rem">Hasil NLU terakhir</div>
+        <pre class="json-box" x-text="JSON.stringify(lastNlu, null, 2)"></pre>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,388 @@
+/* ==========================================================================
+   Anthropic-Inspired Minimalist Design — Robot Voice Command
+   Warm editorial minimalism, terracotta accent, single focus.
+   ========================================================================== */
+
+:root {
+  --bg-canvas: #12110f;
+  --bg-surface: #1a1916;
+  --bg-elevated: #22201b;
+  --border-subtle: #2a2722;
+  --text-primary: #f5f2eb;
+  --text-secondary: #9c9486;
+  --text-muted: #645f56;
+  --accent: #cc785c;
+  --accent-bright: #da7756;
+  --accent-peach: #e8a892;
+  --amber: #d4a359;
+  --emerald: #5ea885;
+  --ruby: #d95d5d;
+  --glow: rgba(204, 120, 92, 0.35);
+
+  --font-serif: "Iowan Old Style", "Apple Garamond", Baskerville, "Times New Roman", "Droid Serif", Georgia, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+[x-cloak] { display: none !important; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+
+html, body { height: 100%; }
+
+body {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 50% 42%, rgba(204, 120, 92, 0.06) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+button { font: inherit; color: inherit; touch-action: manipulation; }
+
+/* ---------------------------------------------------------------- Top bar */
+.top-bar {
+  width: 100%;
+  max-width: 720px;
+  padding: max(1rem, env(safe-area-inset-top)) 1.25rem 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+  z-index: 5;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--emerald);
+  transition: background 0.3s ease;
+}
+.status-dot.listening { background: var(--accent-bright); box-shadow: 0 0 10px var(--accent); animation: pulse 1.2s infinite; }
+.status-dot.processing { background: var(--amber); animation: pulse 0.8s infinite; }
+.status-dot.offline { background: var(--ruby); }
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+}
+.btn-icon:active, .btn-icon:hover { background: var(--bg-surface); color: var(--text-primary); }
+
+/* ---------------------------------------------------------------- Hero */
+.hero-stage {
+  flex: 1;
+  width: 100%;
+  max-width: 560px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+  z-index: 1;
+}
+
+.mic-orb-wrapper {
+  position: relative;
+  width: 300px;
+  height: 300px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 1rem;
+}
+
+#waveCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;   /* canvas tidak boleh menelan sentuhan */
+  z-index: 0;
+}
+
+.mic-orb-btn {
+  position: relative;
+  z-index: 2;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 30%, #27251f, #181714);
+  border: 1px solid rgba(204, 120, 92, 0.28);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.08);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  outline: none;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s, border-color 0.3s;
+}
+
+.mic-orb-btn svg {
+  width: 42px;
+  height: 42px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.mic-orb-btn .stop-icon { width: 30px; height: 30px; fill: var(--accent-bright); stroke: none; }
+
+.mic-orb-btn:active { transform: scale(0.96); }
+
+@media (hover: hover) {
+  .mic-orb-btn:hover { border-color: var(--accent); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), 0 0 24px var(--glow); }
+}
+
+.mic-orb-btn.active {
+  border-color: var(--accent-bright);
+  box-shadow: 0 0 45px var(--glow), 0 0 14px var(--accent);
+}
+.mic-orb-btn.starting { opacity: 0.7; }
+.mic-orb-btn.busy { border-color: rgba(212, 163, 89, 0.45); }
+.mic-orb-btn.busy svg { stroke: var(--amber); }
+
+.action-caption {
+  font-family: var(--font-serif);
+  font-size: 1.4rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  margin-bottom: 1rem;
+  min-height: 1.8rem;
+}
+
+/* Segmented control sumber mic */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  margin-bottom: 0.75rem;
+}
+.segmented button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.segmented button.on { background: var(--bg-elevated); color: var(--text-primary); }
+.segmented button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  max-width: 340px;
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+
+.live-speech-quote {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 1.35rem;
+  line-height: 1.4;
+  color: var(--accent-peach);
+  margin: 0.5rem 0 0.75rem;
+  max-width: 480px;
+}
+
+.robot-response {
+  max-width: 460px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+  animation: fadeIn 0.4s ease;
+}
+.intent-tag {
+  display: inline-block;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+
+/* ---------------------------------------------------------------- Bottom */
+.bottom-bar {
+  width: 100%;
+  max-width: 520px;
+  padding: 0.5rem 1rem max(1.25rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  position: relative;
+  z-index: 5;
+}
+
+.toggles { display: flex; gap: 0.5rem; }
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.5rem 0.95rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.toggle.on { border-color: var(--accent); color: var(--text-primary); background: var(--bg-surface); }
+
+.panel { width: 100%; }
+
+.chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.45rem; }
+
+.chip {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.chip:active, .chip.on { border-color: var(--accent); color: var(--text-primary); background: var(--bg-surface); }
+
+.input-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0.35rem 0.4rem 0.35rem 1.1rem;
+}
+.input-pill:focus-within { border-color: var(--accent); }
+.input-pill input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 16px; /* cegah auto-zoom iOS */
+  user-select: text;
+  -webkit-user-select: text;
+}
+.input-pill input::placeholder { color: var(--text-muted); }
+
+.btn-send {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- Drawer */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.drawer-panel {
+  width: 100%;
+  max-width: 600px;
+  max-height: 85dvh;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-bottom: none;
+  border-radius: 22px 22px 0 0;
+  padding: 1.5rem 1.5rem max(1.5rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.drawer-title { font-family: var(--font-serif); font-weight: 400; font-size: 1.25rem; }
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.85rem;
+}
+.detail-label, .muted { color: var(--text-secondary); font-size: 0.78rem; }
+.detail-val { font-family: var(--font-mono); font-size: 0.78rem; }
+.json-box {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--accent-peach);
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+@keyframes pulse { 0%, 100% { opacity: 0.5; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.3); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+@media (max-width: 420px) {
+  .mic-orb-wrapper { width: 260px; height: 260px; }
+  .mic-orb-btn { width: 116px; height: 116px; }
+  .action-caption { font-size: 1.2rem; }
+}

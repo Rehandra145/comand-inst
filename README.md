@@ -576,7 +576,24 @@ python download_model.py
 
 ### 8.3 Cara Menjalankan Program (GUI & CLI)
 
-#### 1. Mode GUI Tkinter Desktop (Default):
+#### 1. Mode Web Dashboard & Real-Time API (Rekomendasi untuk Headless / Jetson):
+Akses interface modern langsung lewat browser di laptop atau HP di jaringan lokal:
+```bash
+uv run python main.py --web
+# atau kustomisasi port & host:
+uv run python main.py --web --port 8000 --host 0.0.0.0
+```
+- **Akses Browser**: Buka `http://localhost:8000` (atau `http://<ip-jetson>:8000` dari laptop/HP).
+- **Dokumentasi REST API**: Buka `http://localhost:8000/docs` (Swagger UI otomatis).
+- **Fitur Web**:
+  - Tombol kontrol mikrofon hardware Jetson dengan live partial streaming transkripsi RNN-T.
+  - Input perintah teks cepat dengan suggestion chips.
+  - Riwayat dialog percakapan dan respon suara robot.
+  - Inspector NLU (Intent, Confidence score, Entities/Slots, Status validasi).
+  - Mode Simulasi (Mock ROS 2) & konfigurasi IP/Port robot nyata secara dinamis.
+  - Telemetri hardware Jetson Nano (GPU Tegra, CPU, RAM) real-time via WebSocket.
+
+#### 2. Mode GUI Tkinter Desktop:
 ```bash
 uv run python main.py
 # atau paksa mode GUI:
