@@ -3,10 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#12110f">
+  <meta name="theme-color" content="#f8fafb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="/manifest.json">
   <title>Robot Voice Command</title>
-  <link rel="stylesheet" href="/css/style.css?v=3">
-  <script src="/js/app.js?v=3"></script>
+  <link rel="stylesheet" href="/css/style.css?v=7">
+  <script src="/js/app.js?v=7"></script>
   <script defer src="/vendor/alpine.min.js"></script>
 </head>
 <body x-data="zenVoiceSystem" x-cloak>
@@ -21,9 +25,15 @@
       }"></span>
       <span x-text="statusLabel"></span>
     </div>
-    <button class="btn-icon" @click="showDrawer = true" aria-label="Pengaturan">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-    </button>
+    <div style="display:flex;align-items:center;gap:0.25rem">
+      <button x-show="!isKiosk" class="btn-icon" @click="toggleFullscreen()" :title="isFullscreen ? 'Keluar Fullscreen' : 'Layar Penuh (Borderless)'" aria-label="Layar Penuh">
+        <svg x-show="!isFullscreen" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        <svg x-show="isFullscreen" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+      </button>
+      <button class="btn-icon" @click="showDrawer = true" aria-label="Pengaturan">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+      </button>
+    </div>
   </header>
 
   <!-- CENTER: satu tombol mic -->
@@ -57,13 +67,23 @@
       <button type="button" :class="{ on: micSource === 'jetson' }"
               @click="setMicSource('jetson')">Mic robot</button>
     </div>
-    <p class="hint" x-show="hint" x-text="hint"></p>
+    <p class="hint" :class="{ 'is-visible': !!hint, 'is-fading': isFadingOut }" x-text="hint"></p>
 
-    <!-- Transkrip & respons -->
-    <p class="live-speech-quote" x-show="partialTranscript" x-text="'“' + partialTranscript + '”'"></p>
-    <div class="robot-response" x-show="robotResponse">
-      <span class="intent-tag" x-show="lastNlu && lastNlu.intent" x-text="lastNlu ? lastNlu.intent : ''"></span>
-      <p x-text="robotResponse"></p>
+    <!-- Transkrip & respons (Seamless collapsible area agar tidak melompat) -->
+    <div class="feedback-stage" :class="{ 'has-content': !!(partialTranscript || robotResponse), 'is-fading': isFadingOut }">
+      <div class="quote-collapse" :class="{ 'open': !!partialTranscript }">
+        <div class="quote-inner">
+          <p class="live-speech-quote" x-text="partialTranscript ? '“' + partialTranscript + '”' : ''"></p>
+        </div>
+      </div>
+      <div class="response-collapse" :class="{ 'open': !!robotResponse }">
+        <div class="response-inner">
+          <div class="robot-response">
+            <span class="intent-tag" x-show="lastNlu && lastNlu.intent" x-text="lastNlu ? lastNlu.intent : ''"></span>
+            <p x-text="robotResponse"></p>
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 

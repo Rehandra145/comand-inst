@@ -182,6 +182,13 @@ if __name__ == "__main__":
         help="Aktifkan HTTPS/WSS (self-signed cert) agar browser mic HP/laptop bisa dipakai dari jaringan lokal.",
     )
 
+    parser.add_argument(
+        "--kiosk",
+        "--fullscreen",
+        action="store_true",
+        help="Otomatis buka browser lokal dalam mode borderless fullscreen (Kiosk) saat menjalankan --web.",
+    )
+
     args = parser.parse_args()
 
     # 0. Live hardware compute monitor via terminal
@@ -191,7 +198,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # 0.0 Web Interface & API Mode
-    if args.web:
+    if args.web or getattr(args, "kiosk", False):
         from web import run_web_server
         run_web_server(
             host=args.host,
@@ -199,6 +206,7 @@ if __name__ == "__main__":
             ros2_host=args.ros2_host,
             ros2_port=args.ros2_port,
             ssl=args.ssl,
+            kiosk=getattr(args, "kiosk", False),
         )
         sys.exit(0)
 

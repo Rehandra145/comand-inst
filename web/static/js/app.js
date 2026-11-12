@@ -6,6 +6,7 @@
 
 const TARGET_RATE = 16000;
 const CHUNK_SAMPLES = 1600; // 100 ms @ 16 kHz
+const AUTO_CLEAR_MS = 15000; // Hapus teks perintah & respon otomatis setelah 15 detik IDLE
 
 document.addEventListener("alpine:init", () => {
   Alpine.data("zenVoiceSystem", () => ({
@@ -21,6 +22,11 @@ document.addEventListener("alpine:init", () => {
     audioLevel: 0,
     hint: "",
     showDrawer: false,
+    isFullscreen: false,
+    isKiosk: new URLSearchParams(window.location.search).get("kiosk") === "1" ||
+             window.matchMedia("(display-mode: fullscreen)").matches ||
+             window.matchMedia("(display-mode: standalone)").matches,
+    isFadingOut: false,
     panel: null, // null | "quick" | "type"
     textInput: "",
 
@@ -35,6 +41,8 @@ document.addEventListener("alpine:init", () => {
     _node: null,
     _streaming: false,
     _pending: null,
+    _clearTimer: null,
+    _fadeTimer: null,
 
     quickCommands: [
       { label: "Antar ke ICU", text: "tolong antar saya ke ruang ICU" },
@@ -62,6 +70,26 @@ document.addEventListener("alpine:init", () => {
       this.fetchInitialStatus();
       this.connectWebSocket();
       this.$nextTick(() => this.initWaveCanvas());
+
+      // Pantau perubahan status fullscreen
+      const updateFs = () => {
+        this.isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      };
+      document.addEventListener("fullscreenchange", updateFs);
+      document.addEventListener("webkitfullscreenchange", updateFs);
+      updateFs();
+    },
+
+    toggleFullscreen() {
+      const doc = document;
+      const el = document.documentElement;
+      if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
+        if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      } else {
+        if (doc.exitFullscreen) doc.exitFullscreen().catch(() => {});
+        else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
+      }
     },
 
     get statusLabel() {
@@ -95,6 +123,42 @@ document.addEventListener("alpine:init", () => {
     setState(s) {
       if (s !== this.state) this.stateSince = Date.now();
       this.state = s;
+      if (s === "IDLE") {
+        this._scheduleAutoClear();
+      } else {
+        this._cancelAutoClear();
+      }
+    },
+
+    _scheduleAutoClear() {
+      this._cancelAutoClear();
+      if (!this.partialTranscript && !this.robotResponse && !this.hint) return;
+      this._clearTimer = setTimeout(() => {
+        if (this.state === "IDLE") {
+          // Fase 1: jalankan animasi fade-out + blur + collapse tinggi (650ms)
+          this.isFadingOut = true;
+          this._fadeTimer = setTimeout(() => {
+            if (this.state === "IDLE") {
+              this.partialTranscript = "";
+              this.robotResponse = "";
+              this.hint = "";
+            }
+            this.isFadingOut = false;
+          }, 680);
+        }
+      }, AUTO_CLEAR_MS);
+    },
+
+    _cancelAutoClear() {
+      this.isFadingOut = false;
+      if (this._clearTimer) {
+        clearTimeout(this._clearTimer);
+        this._clearTimer = null;
+      }
+      if (this._fadeTimer) {
+        clearTimeout(this._fadeTimer);
+        this._fadeTimer = null;
+      }
     },
 
     // ---------------------------------------------------------------- network
@@ -104,6 +168,7 @@ document.addEventListener("alpine:init", () => {
         if (!res.ok) return;
         const d = await res.json();
         this.setState(d.state || "IDLE");
+        if (d.kiosk) this.isKiosk = true;
         this.telemetry = { ...this.telemetry, ...d.telemetry };
         this.ros2 = { ...this.ros2, ...d.ros2 };
       } catch (e) {
@@ -150,6 +215,7 @@ document.addEventListener("alpine:init", () => {
         case "handshake":
           this.setState(msg.state || "IDLE");
           this.ros2.mode = msg.mock ? "mock" : "socket";
+          if (msg.kiosk) this.isKiosk = true;
           break;
         case "audio_level":
           if (!this._streaming) this.audioLevel = msg.level || 0; // mic robot
@@ -181,6 +247,7 @@ document.addEventListener("alpine:init", () => {
           this.lastNlu = msg.data;
           this.robotResponse = msg.response || (msg.data && msg.data.robot_response) || "";
           this.hint = "";
+          if (this.state === "IDLE") this._scheduleAutoClear();
           break;
         case "browser_mic_ready":
           this.dbg("browser_mic_ready", { success: msg.success, state: msg.state });
@@ -407,6 +474,7 @@ document.addEventListener("alpine:init", () => {
         }).then((r) => r.json()).then((d) => {
           this.lastNlu = d;
           this.robotResponse = d.robot_response || "";
+          this._scheduleAutoClear();
         }).catch(() => (this.hint = "Gagal mengirim perintah."));
       }
     },
@@ -440,10 +508,10 @@ document.addEventListener("alpine:init", () => {
       window.addEventListener("resize", resize);
 
       const layers = [
-        { off: 10, f: 5, c: "rgba(218,119,86,0.50)", w: 2.2, p: 0 },
-        { off: 22, f: 7, c: "rgba(232,168,146,0.35)", w: 1.8, p: 1.2 },
-        { off: 36, f: 4, c: "rgba(212,163,89,0.25)", w: 1.4, p: 2.5 },
-        { off: 52, f: 6, c: "rgba(204,120,92,0.14)", w: 1.0, p: 3.8 },
+        { off: 10, f: 5, c: "rgba(13,148,136,0.55)", w: 2.2, p: 0 },
+        { off: 22, f: 7, c: "rgba(20,184,166,0.38)", w: 1.8, p: 1.2 },
+        { off: 36, f: 4, c: "rgba(17,24,39,0.22)", w: 1.4, p: 2.5 },
+        { off: 52, f: 6, c: "rgba(13,148,136,0.16)", w: 1.0, p: 3.8 },
       ];
 
       const render = () => {
@@ -476,7 +544,7 @@ document.addEventListener("alpine:init", () => {
         } else {
           ctx.beginPath();
           ctx.arc(cx, cy, base + 8 + Math.sin(this._phase) * 3, 0, Math.PI * 2);
-          ctx.strokeStyle = "rgba(204,120,92,0.12)";
+          ctx.strokeStyle = "rgba(13,148,136,0.20)";
           ctx.lineWidth = 1.2;
           ctx.stroke();
         }

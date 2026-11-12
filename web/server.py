@@ -25,6 +25,7 @@ logger = logging.getLogger("web.server")
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+KIOSK_MODE = False
 
 app = FastAPI(
     title="Robot Voice Command & NLU Interface",
@@ -203,6 +204,7 @@ async def get_system_status():
         },
         "devices": devices,
         "tts_enabled": coord.tts_enabled,
+        "kiosk": KIOSK_MODE,
     }
 
 
@@ -286,6 +288,7 @@ async def websocket_endpoint(websocket: WebSocket):
         "state": coord.state,
         "mock": coord.use_mock_ros2,
         "last_result": coord.last_result,
+        "kiosk": KIOSK_MODE,
     })
 
     loop = asyncio.get_running_loop()
@@ -383,8 +386,11 @@ def run_web_server(
     ros2_host: Optional[str] = None,
     ros2_port: Optional[int] = None,
     ssl: bool = False,
+    kiosk: bool = False,
 ):
     """Fungsi utama untuk menjalankan web server Uvicorn."""
+    global KIOSK_MODE
+    KIOSK_MODE = bool(kiosk)
     # Pastikan coordinator terinisialisasi dengan parameter host/port
     get_coordinator(ros2_host=ros2_host, ros2_port=ros2_port)
 
@@ -435,7 +441,36 @@ def run_web_server(
         print(f"  ● Browser Mic HP    : AKTIF (getUserMedia via HTTPS)")
     else:
         print(f"  ● Browser Mic HP    : Gunakan --ssl untuk mengaktifkan")
+    if kiosk:
+        print(f"  ● Kiosk Fullscreen  : AKTIF (Borderless Window)")
     print(f"=" * 68 + "\n")
+
+    if kiosk and os.environ.get("DISPLAY"):
+        import shutil
+        import subprocess
+        import threading
+
+        target_url = f"{scheme}://localhost:{port}/?kiosk=1"
+
+        def _launch_kiosk():
+            import time
+            time.sleep(1.8)
+            for b in ("chromium-browser", "chromium", "google-chrome"):
+                if shutil.which(b):
+                    subprocess.Popen(
+                        [b, "--kiosk", "--app=" + target_url, "--ignore-certificate-errors", "--noerrdialogs", "--disable-infobars"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return
+            if shutil.which("firefox"):
+                subprocess.Popen(
+                    ["firefox", "--kiosk", target_url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+        threading.Thread(target=_launch_kiosk, daemon=True).start()
 
     uvicorn.run(
         app,
